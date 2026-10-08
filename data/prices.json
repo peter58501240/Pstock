@@ -1,0 +1,68 @@
+{
+  "updated_at": "2026-10-07T14:10:00+08:00",
+  "market_date": "2026-10-07",
+  "prices": {
+    "2030": {
+      "close": 36.75,
+      "name": "彰源",
+      "source": "fallback",
+      "market_date": "2026-10-07"
+    },
+    "3481": {
+      "close": 52.5,
+      "name": "群創",
+      "source": "fallback",
+      "market_date": "2026-10-07"
+    },
+    "3491": {
+      "close": 1705,
+      "name": "昇達科",
+      "source": "fallback",
+      "market_date": "2026-10-07"
+    },
+    "4919": {
+      "close": 159.5,
+      "name": "新唐",
+      "source": "fallback",
+      "market_date": "2026-10-07"
+    },
+    "5347": {
+      "close": 190,
+      "name": "世界",
+      "source": "fallback",
+      "market_date": "2026-10-07"
+    },
+    "5471": {
+      "close": 51.7,
+      "name": "松翰",
+      "source": "fallback",
+      "market_date": "2026-10-07"
+    },
+    "6147": {
+      "close": 231.5,
+      "name": "頎邦",
+      "source": "fallback",
+      "market_date": "2026-10-07"
+    },
+    "6442": {
+      "close": 1815,
+      "name": "光聖",
+      "source": "fallback",
+      "market_date": "2026-10-07"
+    },
+    "6706": {
+      "close": 154,
+      "name": "惠特",
+      "source": "fallback",
+      "market_date": "2026-10-07"
+    },
+    "00935": {
+      "close": 62.95,
+      "name": "野村臺灣新科技50",
+      "source": "fallback",
+      "market_date": "2026-10-07"
+    }
+  },
+  "missing": [],
+  "errors": []
+}
