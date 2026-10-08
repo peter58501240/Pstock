@@ -4,6 +4,9 @@ on:
   push:
     branches: ["main"]
   workflow_dispatch:
+  schedule:
+    # Taiwan market closes at 13:30. 06:10 UTC = 14:10 Asia/Taipei.
+    - cron: "10 6 * * 1-5"
 
 permissions:
   contents: read
@@ -23,6 +26,14 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Fetch latest Taiwan closing prices
+        run: python scripts/update_prices.py
 
       - name: Setup Pages
         uses: actions/configure-pages@v5
