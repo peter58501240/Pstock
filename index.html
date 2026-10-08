@@ -42,7 +42,7 @@
       <div class="card"><div class="label">核心股票本金</div><div class="value">300,000</div><div class="hint">固定績效基準</div></div>
       <div class="card"><div class="label">累積已實現投資收益</div><div class="value red">+89,388</div><div class="hint">交易＋股息＋折讓等</div></div>
       <div class="card"><div class="label">未實現損益</div><div id="unrealized" class="value">--</div><div class="hint">依最新成交價／收盤價自動計算</div></div>
-      <div class="card"><div class="label">交割後現金</div><div class="value blue">-418</div><div class="hint">含 10/08 新增 00935 買進之預估交割</div></div>
+      <div class="card"><div class="label">交割後現金</div><div class="value blue">9,182</div><div class="hint">已含 10/08 補入現金 9,600 元</div></div>
     </div>
     <div class="cards">
       <div class="card"><div class="label">目前股票市值</div><div id="marketValue" class="value">--</div></div>
@@ -54,7 +54,7 @@
       <div class="card">
         <div class="title">帳戶結構</div>
         <div class="row"><span class="l">目前實際帳戶資產</span><span id="actualAssets" class="r">--</span></div>
-        <div class="row"><span class="l">先前淨挪作私用</span><span class="r green">39,600</span></div>
+        <div class="row"><span class="l">先前淨挪作私用</span><span class="r green">30,000</span></div>
         <div class="row"><span class="l">還原後總資產</span><span id="restoredAssets" class="r">--</span></div>
       </div>
       <div class="notice">
@@ -122,7 +122,7 @@
 </div>
 
 <script>
-const CAPITAL=300000, REALIZED_TOTAL=89388, CASH=-418, PRIVATE_NET=39600;
+const CAPITAL=300000, REALIZED_TOTAL=89388, CASH=9182, PRIVATE_NET=30000;
 const holdings=[
 {code:"00935",name:"野村臺灣新科技50",qty:300,avg:63.02,cost:18907,fallback:62.95},
 {code:"2030",name:"彰源",qty:1000,avg:39.36,cost:39356,fallback:36.75},
