@@ -361,6 +361,24 @@ function scheduleTrendAutoscale(){
   clearTimeout(chart._pstockAutoscaleTimer);
   chart._pstockAutoscaleTimer=setTimeout(()=>autoscaleTrendY(),70);
 }
+function updateTrendDateTicks(){
+  const r=currentXRange();
+  if(!r) return;
+  const days=Math.max(1,(r[1]-r[0])/86400000);
+  let dtick;
+  if(days<=35) dtick=5*86400000;
+  else if(days<=70) dtick=7*86400000;
+  else if(days<=140) dtick=14*86400000;
+  else if(days<=280) dtick=30*86400000;
+  else if(days<=560) dtick=60*86400000;
+  else dtick=120*86400000;
+  const tickformat=days>560?"%Y/%-m":"%-m/%-d";
+  Plotly.relayout("trendChart",{
+    "xaxis.dtick":dtick,
+    "xaxis.tickformat":tickformat,
+    "xaxis.hoverformat":"%Y/%-m/%-d"
+  });
+}
 function currentXRange(){
   const chart=$("trendChart");
   const r=chart?.layout?.xaxis?.range;
@@ -379,12 +397,14 @@ async function zoomTrend(factor){
   const mid=(r[0]+r[1])/2;
   const half=(r[1]-r[0])*factor/2;
   await Plotly.relayout("trendChart",{"xaxis.range":[new Date(mid-half),new Date(mid+half)]});
+  updateTrendDateTicks();
   scheduleTrendAutoscale();
 }
 async function resetTrendZoom(){
   const r=initialTrendRange();
   if(!r) return;
   await Plotly.relayout("trendChart",{"xaxis.range":r});
+  updateTrendDateTicks();
   scheduleTrendAutoscale();
 }
 function bindTrendPinch(){
@@ -407,6 +427,7 @@ function bindTrendPinch(){
     const mid=(pinchState.range[0]+pinchState.range[1])/2;
     const half=(pinchState.range[1]-pinchState.range[0])*scale/2;
     Plotly.relayout(chart,{"xaxis.range":[new Date(mid-half),new Date(mid+half)]});
+    updateTrendDateTicks();
     scheduleTrendAutoscale();
   },{passive:false});
   chart.addEventListener("touchend",e=>{if(e.touches.length<2) pinchState=null;},{passive:true});
@@ -636,7 +657,7 @@ function autoTrendLines(bars){
   const resistance=chooseHorizontalLevel(pool,bars,atr,"R",activeStart);
   const support=chooseHorizontalLevel(pool,bars,atr,"S",activeStart);
 
-  const shapes=[],annotations=[],summary=[];
+  const shapes=[],annotations=[],summary=[],labelMeta=[];
   const lastI=bars.length-1,lastDate=bars[lastI].date;
   const structureDate=bars[Math.max(0,activeStart)]?.date||bars[0].date;
 
@@ -645,12 +666,7 @@ function autoTrendLines(bars){
       type:"line",xref:"x",yref:"y",x0,y0,x1,y1,
       line:{color,width:2.3,dash:dash||"solid"},layer:"above"
     });
-    annotations.push({
-      x:x1,y:y1,xref:"x",yref:"y",text:label+" "+Number(y1).toFixed(2),
-      showarrow:false,xanchor:"right",xshift:-4,yshift:10,
-      font:{size:11,color},bgcolor:"rgba(255,255,255,.88)",
-      bordercolor:color,borderwidth:1,borderpad:3
-    });
+    labelMeta.push({label,y:Number(y1),color});
     summary.push(label+(detail?"（"+detail+"）":""));
   };
 
@@ -670,6 +686,34 @@ function autoTrendLines(bars){
     addLine("支撐線",structureDate,support.level,lastDate,support.level,"#111827","dash",
       support.touches+" 次測試");
   }
+
+  // Put labels in a dedicated lane to the right of the K chart.
+  // If price levels are close, stagger labels vertically so boxes never pile on top of candles or each other.
+  const lastAtr=atrAt(atr,lastI,bars);
+  const collision=Math.max(lastAtr*1.4,Number(bars[lastI].close)*0.018);
+  const sorted=[...labelMeta].sort((a,b)=>b.y-a.y);
+  let cluster=0,prevY=null;
+  const shifts=new Map();
+  for(const m of sorted){
+    if(prevY!==null && Math.abs(prevY-m.y)<=collision) cluster++;
+    else cluster=0;
+    const mag=Math.ceil(cluster/2)*18;
+    const shift=cluster===0?0:(cluster%2?mag:-mag);
+    shifts.set(m.label,shift);
+    prevY=m.y;
+  }
+  for(const m of labelMeta){
+    annotations.push({
+      x:1.012,y:m.y,xref:"paper",yref:"y",
+      text:m.label+" "+m.y.toFixed(2),
+      showarrow:false,xanchor:"left",yanchor:"middle",
+      yshift:shifts.get(m.label)||0,
+      font:{size:11,color:m.color},
+      bgcolor:"rgba(255,255,255,.96)",
+      bordercolor:m.color,borderwidth:1,borderpad:3
+    });
+  }
+
   return {
     shapes:shapes.slice(0,4),
     annotations:annotations.slice(0,4),
@@ -704,29 +748,31 @@ function renderTrend(){
   const auto=autoTrendLines(view);
   const startIndex=0;
   const initialRange=initialTrendRange();
+  const chartMargin=window.innerWidth<=820?{l:34,r:100,t:26,b:40}:{l:52,r:122,t:30,b:42};
   const traces=[
     {
       type:"candlestick",name:"K線",x,
       open:view.map(b=>b.open),high:view.map(b=>b.high),low:view.map(b=>b.low),close:view.map(b=>b.close),
       increasing:{line:{color:"#d92d20"},fillcolor:"#d92d20"},
       decreasing:{line:{color:"#07883f"},fillcolor:"#07883f"},
-      yaxis:"y"
+      yaxis:"y",
+      hovertext:view.map(b=>b.date.replace(/^\d{4}-0?/, "").replace("-","/"))
     },
     {
       type:"bar",name:"成交量",x,y:view.map(b=>b.volume),yaxis:"y2",
       marker:{color:view.map(b=>b.close>=b.open?"rgba(217,45,32,.55)":"rgba(7,136,63,.55)")},
-      hovertemplate:"%{x}<br>成交量 %{y:,}<extra></extra>"
+      hovertemplate:"%{x|%-m/%-d}<br>成交量 %{y:,}<extra></extra>"
     },
     ...maNs.map(n=>({
       type:"scatter",mode:"lines",name:"MA"+n,x,
       y:view.map((b,j)=>maAll[n][startIndex+j]),
       line:{width:n===10?2.2:1.25},
       connectgaps:false,yaxis:"y",
-      hovertemplate:"%{x}<br>MA"+n+" %{y:.2f}<extra></extra>"
+      hovertemplate:"%{x|%-m/%-d}<br>MA"+n+" %{y:.2f}<extra></extra>"
     }))
   ];
   const layout={
-    margin:{l:58,r:58,t:34,b:42},
+    margin:chartMargin,
     paper_bgcolor:"#fff",plot_bgcolor:"#fff",
     hovermode:"x unified",
     dragmode:"pan",
@@ -735,7 +781,10 @@ function renderTrend(){
     xaxis:{
       type:"date",rangeslider:{visible:false},showgrid:true,gridcolor:"#eef0f3",
       rangebreaks:[{bounds:["sat","mon"]}],
-      range:initialRange||undefined
+      range:initialRange||undefined,
+      tickformat:"%-m/%-d",
+      hoverformat:"%Y/%-m/%-d",
+      automargin:true
     },
     yaxis:{domain:[0.27,1],side:"right",showgrid:true,gridcolor:"#eef0f3",fixedrange:false},
     yaxis2:{domain:[0,0.20],side:"right",showgrid:true,gridcolor:"#f3f4f6",fixedrange:false},
@@ -755,18 +804,23 @@ function renderTrend(){
       chart.on("plotly_relayout",ev=>{
         if(trendAutoScaling) return;
         const keys=Object.keys(ev||{});
-        if(keys.some(k=>k.startsWith("xaxis.range")||k==="xaxis.autorange")) scheduleTrendAutoscale();
+        if(keys.some(k=>k.startsWith("xaxis.range")||k==="xaxis.autorange")){
+          updateTrendDateTicks();
+          scheduleTrendAutoscale();
+        }
       });
       trendListenerBound=true;
     }
     bindTrendPinch();
     setTimeout(()=>{
       Plotly.Plots.resize(chart);
+      updateTrendDateTicks();
       scheduleTrendAutoscale();
     },50);
   });
   const lineText=auto.summary.length?auto.summary.join("、"):"目前沒有找到足夠明確的切線";
-  $("trendStatus").textContent=info.name+" "+code+"｜目前結構起點 "+(auto.activeStartDate||"--")+"｜"+lineText;
+  const structureMD=auto.activeStartDate?auto.activeStartDate.slice(5).replace(/^0/,"").replace("-","/").replace("/0","/"):"--";
+  $("trendStatus").textContent=info.name+" "+code+"｜目前結構起點 "+structureMD+"｜"+lineText;
 }
 async function initTrendTab(){
   try{
