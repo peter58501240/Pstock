@@ -126,12 +126,12 @@
 
   <section id="realized" class="section">
     <div class="card table-card">
-      <div class="head"><div><div class="title">已實現損益排名</div><div class="note">FIFO 配對；多筆交易依股數加權平均成本價與賣出價</div></div><button id="csvBtn" class="btn">下載 CSV</button></div>
+      <div class="head"><div><div class="title">已實現損益排名</div><div class="note">FIFO 配對；多筆交易依股數加權平均成本價與賣出價；最新收盤價取自 TWSE／TPEx 官方資料</div></div><button id="csvBtn" class="btn">下載 CSV</button></div>
       <div class="table-wrap">
         <table>
-          <thead><tr><th>排名 / 股票</th><th>已賣股數</th><th>平均成本價</th><th>平均賣出價</th><th>已實現損益</th><th>報酬率</th></tr></thead>
+          <thead><tr><th>排名 / 股票</th><th>已賣股數</th><th>平均成本價</th><th>平均賣出價</th><th>最新收盤價</th><th>已實現損益</th><th>報酬率</th></tr></thead>
           <tbody id="realizedRows"></tbody>
-          <tfoot><tr style="font-weight:900;background:#fafafa"><td>股票交易合計</td><td></td><td></td><td></td><td class="red">+84,791</td><td></td></tr></tfoot>
+          <tfoot><tr style="font-weight:900;background:#fafafa"><td>股票交易合計</td><td></td><td></td><td></td><td></td><td class="red">+84,791</td><td></td></tr></tfoot>
         </table>
       </div>
     </div>
@@ -236,6 +236,7 @@ async function loadClosingFallback(){
     pricePayload={prices:{},errors:[String(e)],market_date:null};
   }
   render();
+  renderRealized();
 }
 
 async function loadRealtime(){
@@ -555,9 +556,17 @@ async function initTrendTab(){
   }
 }
 
-$("realizedRows").innerHTML=realized.map((r,i)=>'<tr><td><span class="rank '+(i<3?"top":"")+'">'+(i+1)+'</span><span class="name">'+r.name+'</span> <span class="code">'+r.code+'</span></td><td>'+nf.format(r.qty)+'</td><td>'+r.buy.toFixed(2)+'</td><td>'+r.sell.toFixed(2)+'</td><td><span class="pill '+cls(r.pnl)+'">'+sign(r.pnl)+'</span></td><td class="'+cls(r.ret)+'"><b>'+pct(r.ret)+'</b></td></tr>').join("");
+function renderRealized(){
+  $("realizedRows").innerHTML=realized.map((r,i)=>{
+    const p=pricePayload.prices?.[r.code];
+    const close=Number(p?.close);
+    const closeText=Number.isFinite(close)?close.toFixed(2):"--";
+    return '<tr><td><span class="rank '+(i<3?"top":"")+'">'+(i+1)+'</span><span class="name">'+r.name+'</span> <span class="code">'+r.code+'</span></td><td>'+nf.format(r.qty)+'</td><td>'+r.buy.toFixed(2)+'</td><td>'+r.sell.toFixed(2)+'</td><td><b>'+closeText+'</b></td><td><span class="pill '+cls(r.pnl)+'">'+sign(r.pnl)+'</span></td><td class="'+cls(r.ret)+'"><b>'+pct(r.ret)+'</b></td></tr>';
+  }).join("");
+}
+renderRealized();
 $("refreshBtn").onclick=async()=>{await loadClosingFallback();await loadRealtime();};
-$("csvBtn").onclick=()=>{const rows=[["排名","代號","名稱","已賣股數","平均成本價","平均賣出價","已實現損益","報酬率"],...realized.map((r,i)=>[i+1,r.code,r.name,r.qty,r.buy,r.sell,r.pnl,r.ret+"%"])],csv="\ufeff"+rows.map(x=>x.join(",")).join("\n"),a=document.createElement("a");a.href=URL.createObjectURL(new Blob([csv],{type:"text/csv;charset=utf-8"}));a.download="Pstock-realized.csv";a.click();URL.revokeObjectURL(a.href)};
+$("csvBtn").onclick=()=>{const rows=[["排名","代號","名稱","已賣股數","平均成本價","平均賣出價","最新收盤價","已實現損益","報酬率"],...realized.map((r,i)=>{const close=Number(pricePayload.prices?.[r.code]?.close);return [i+1,r.code,r.name,r.qty,r.buy,r.sell,Number.isFinite(close)?close:"",r.pnl,r.ret+"%"]})],csv="\ufeff"+rows.map(x=>x.join(",")).join("\n"),a=document.createElement("a");a.href=URL.createObjectURL(new Blob([csv],{type:"text/csv;charset=utf-8"}));a.download="Pstock-realized.csv";a.click();URL.revokeObjectURL(a.href)};
 loadClosingFallback().then(loadRealtime);
 </script>
 </body>
