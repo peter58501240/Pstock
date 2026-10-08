@@ -101,14 +101,11 @@
       <div class="head">
         <div>
           <div class="title">Ray 哥切線分析工作台</div>
-          <div class="note">日 K＋成交量＋MA5／10／20／60／120／240；系統自動找關鍵高低點，最多畫 4 條線</div>
+          <div class="note">日 K＋成交量＋MA5／10／20／60／120／240；完整載入歷史資料，用縮放自行決定顯示區間</div>
         </div>
       </div>
       <div class="trend-toolbar">
         <select id="trendTicker"></select>
-        <button class="btn trend-period" data-days="183">6M</button>
-        <button class="btn trend-period active" data-days="365">1Y</button>
-        <button class="btn trend-period" data-days="730">2Y</button>
         <button id="panBtn" class="btn">✋ 拖曳</button>
         <button id="zoomInBtn" class="btn">＋ 放大</button>
         <button id="zoomOutBtn" class="btn">－ 縮小</button>
@@ -117,7 +114,7 @@
       <div id="trendChart" class="trend-chart"></div>
       <div id="trendStatus" class="trend-status">歷史資料讀取中…</div>
       <div class="trend-help">
-        自動畫線規則：上升切線連接有效墊高低點；下降切線連接有效降低高點；壓力線尋找多次受阻的水平高點；失敗線優先取最近突破點，找不到時回退到最近關鍵低點。最多同時顯示 4 條。電腦可用滾輪縮放；手機可雙指縮放，也可用「＋／－」按鈕。
+        圖表會一次載入完整歷史資料，不限制 3M／6M／1Y。你看到多久完全由縮放決定：放大時 K 棒會變粗、價格軸也會依目前可見區間自動重算；縮小時會看到更長時間、K 棒自然變細。手機可雙指縮放，也可用「＋／－」按鈕。
       </div>
     </div>
   </section>
@@ -326,11 +323,53 @@ function render(){
 }
 
 let historyPayload=null;
-let trendDays=365;
 let trendInitialized=false;
+let trendListenerBound=false;
+let trendAutoScaling=false;
 let currentTrendBars=[];
 let pinchState=null;
 
+function dateMs(v){
+  const t=new Date(v).getTime();
+  return Number.isFinite(t)?t:null;
+}
+function initialTrendRange(){
+  if(!currentTrendBars.length) return null;
+  const start=Math.max(0,currentTrendBars.length-60);
+  return [currentTrendBars[start].date,currentTrendBars[currentTrendBars.length-1].date];
+}
+function visibleTrendBars(){
+  const r=currentXRange();
+  if(!r) return currentTrendBars;
+  return currentTrendBars.filter(b=>{
+    const t=dateMs(b.date+"T00:00:00");
+    return t!==null&&t>=r[0]&&t<=r[1];
+  });
+}
+async function autoscaleTrendY(){
+  if(trendAutoScaling) return;
+  const bars=visibleTrendBars();
+  if(!bars.length) return;
+  const lo=Math.min(...bars.map(b=>Number(b.low)));
+  const hi=Math.max(...bars.map(b=>Number(b.high)));
+  const vol=Math.max(...bars.map(b=>Number(b.volume)||0));
+  if(!Number.isFinite(lo)||!Number.isFinite(hi)||hi<=lo) return;
+  const pad=Math.max((hi-lo)*0.08,hi*0.008);
+  trendAutoScaling=true;
+  try{
+    await Plotly.relayout("trendChart",{
+      "yaxis.range":[Math.max(0,lo-pad),hi+pad],
+      "yaxis2.range":[0,vol>0?vol*1.15:1]
+    });
+  }finally{
+    trendAutoScaling=false;
+  }
+}
+function scheduleTrendAutoscale(){
+  const chart=$("trendChart");
+  clearTimeout(chart._pstockAutoscaleTimer);
+  chart._pstockAutoscaleTimer=setTimeout(()=>autoscaleTrendY(),70);
+}
 function currentXRange(){
   const chart=$("trendChart");
   const r=chart?.layout?.xaxis?.range;
@@ -343,15 +382,19 @@ function currentXRange(){
   }
   return null;
 }
-function zoomTrend(factor){
+async function zoomTrend(factor){
   const r=currentXRange();
   if(!r) return;
   const mid=(r[0]+r[1])/2;
   const half=(r[1]-r[0])*factor/2;
-  Plotly.relayout("trendChart",{"xaxis.range":[new Date(mid-half),new Date(mid+half)]});
+  await Plotly.relayout("trendChart",{"xaxis.range":[new Date(mid-half),new Date(mid+half)]});
+  scheduleTrendAutoscale();
 }
-function resetTrendZoom(){
-  Plotly.relayout("trendChart",{"xaxis.autorange":true,"yaxis.autorange":true,"yaxis2.autorange":true});
+async function resetTrendZoom(){
+  const r=initialTrendRange();
+  if(!r) return;
+  await Plotly.relayout("trendChart",{"xaxis.range":r});
+  scheduleTrendAutoscale();
 }
 function bindTrendPinch(){
   const chart=$("trendChart");
@@ -373,6 +416,7 @@ function bindTrendPinch(){
     const mid=(pinchState.range[0]+pinchState.range[1])/2;
     const half=(pinchState.range[1]-pinchState.range[0])*scale/2;
     Plotly.relayout(chart,{"xaxis.range":[new Date(mid-half),new Date(mid+half)]});
+    scheduleTrendAutoscale();
   },{passive:false});
   chart.addEventListener("touchend",e=>{if(e.touches.length<2) pinchState=null;},{passive:true});
 }
@@ -534,16 +578,14 @@ function renderTrend(){
     return;
   }
   const bars=info.bars;
-  const latest=new Date(bars[bars.length-1].date+"T00:00:00");
-  const cutoff=new Date(latest);
-  cutoff.setDate(cutoff.getDate()-trendDays);
-  const startIndex=Math.max(0,bars.findIndex(b=>new Date(b.date+"T00:00:00")>=cutoff));
-  const view=bars.slice(startIndex);
+  const view=bars;
   currentTrendBars=view;
   const x=view.map(b=>b.date);
   const maNs=[5,10,20,60,120,240];
   const maAll=Object.fromEntries(maNs.map(n=>[n,calcMA(bars,n)]));
   const auto=autoTrendLines(view);
+  const startIndex=0;
+  const initialRange=initialTrendRange();
   const traces=[
     {
       type:"candlestick",name:"K線",x,
@@ -574,13 +616,14 @@ function renderTrend(){
     legend:{orientation:"h",y:1.04,x:0},
     xaxis:{
       type:"date",rangeslider:{visible:false},showgrid:true,gridcolor:"#eef0f3",
-      rangebreaks:[{bounds:["sat","mon"]}]
+      rangebreaks:[{bounds:["sat","mon"]}],
+      range:initialRange||undefined
     },
     yaxis:{domain:[0.27,1],side:"right",showgrid:true,gridcolor:"#eef0f3",fixedrange:false},
     yaxis2:{domain:[0,0.20],side:"right",showgrid:true,gridcolor:"#f3f4f6",fixedrange:false},
     shapes:auto.shapes,
     annotations:auto.annotations,
-    uirevision:code+"-"+trendDays
+    uirevision:code
   };
   const config={
     responsive:true,displaylogo:false,scrollZoom:true,editable:false,
@@ -590,11 +633,22 @@ function renderTrend(){
   const p=trendInitialized?Plotly.react(chart,traces,layout,config):Plotly.newPlot(chart,traces,layout,config);
   Promise.resolve(p).then(()=>{
     trendInitialized=true;
+    if(!trendListenerBound){
+      chart.on("plotly_relayout",ev=>{
+        if(trendAutoScaling) return;
+        const keys=Object.keys(ev||{});
+        if(keys.some(k=>k.startsWith("xaxis.range")||k==="xaxis.autorange")) scheduleTrendAutoscale();
+      });
+      trendListenerBound=true;
+    }
     bindTrendPinch();
-    setTimeout(()=>Plotly.Plots.resize(chart),50);
+    setTimeout(()=>{
+      Plotly.Plots.resize(chart);
+      scheduleTrendAutoscale();
+    },50);
   });
   const lineText=auto.summary.length?auto.summary.join("、"):"目前沒有找到足夠明確的切線";
-  $("trendStatus").textContent=info.name+" "+code+"｜"+view[0].date+" ～ "+view[view.length-1].date+"｜"+view.length+" 根日K｜自動線："+lineText+"｜資料："+(historyPayload.source||"歷史日線");
+  $("trendStatus").textContent=info.name+" "+code+"｜已載入 "+view[0].date+" ～ "+view[view.length-1].date+" 共 "+view.length+" 根日K｜目前顯示區間由縮放決定｜自動線："+lineText+"｜資料："+(historyPayload.source||"歷史日線");
 }
 async function initTrendTab(){
   try{
@@ -602,12 +656,6 @@ async function initTrendTab(){
       $("trendTicker").innerHTML=holdings.map(h=>'<option value="'+h.code+'">'+h.code+" "+h.name+"</option>").join("");
       $("trendTicker").value="4919";
       $("trendTicker").onchange=()=>renderTrend();
-      document.querySelectorAll(".trend-period").forEach(btn=>btn.onclick=()=>{
-        document.querySelectorAll(".trend-period").forEach(x=>x.classList.remove("active"));
-        btn.classList.add("active");
-        trendDays=Number(btn.dataset.days);
-        renderTrend();
-      });
       $("panBtn").onclick=()=>Plotly.relayout("trendChart",{dragmode:"pan"});
       $("zoomInBtn").onclick=()=>zoomTrend(0.72);
       $("zoomOutBtn").onclick=()=>zoomTrend(1.38);
