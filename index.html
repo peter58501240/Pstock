@@ -520,180 +520,204 @@ function buildSwings(bars,atr,mult=2.4){
   if(direction===-1 && (!swings.length||swings[swings.length-1].i!==low.i)) swings.push({...low,type:"L",forming:true});
   return swings;
 }
+// Automatic Ray-style levels: identify pivots, validate geometry, then rank relevance.
+// Keep at most one of each: rising support, falling resistance, horizontal support/resistance.
 function activeStructure(swings,bars,atr){
-  if(!swings.length) return {start:Math.max(0,bars.length-90),swings:[]};
-  const confirmed=swings.filter(s=>!s.forming);
-  const base=confirmed.length>=3?confirmed:swings;
-  const take=Math.min(7,base.length);
-  let chosen=base.slice(-take);
-  let start=chosen.length?chosen[0].i:Math.max(0,bars.length-90);
-
-  // Do not let a very old anchor dominate the current structure unless it is still near price.
-  const current=Number(bars[bars.length-1].close);
-  const lastAtr=atrAt(atr,bars.length-1,bars);
-  while(chosen.length>4){
-    const first=chosen[0];
-    const age=bars.length-1-first.i;
-    const dist=Math.abs(current-first.y)/Math.max(lastAtr,1e-9);
-    if(age>180 && dist>10){
-      chosen=chosen.slice(1);
-      start=chosen[0].i;
-    }else break;
-  }
-  return {start,swings:chosen};
+  const last=bars.length-1;
+  const recent=swings.filter(p=>!p.forming&&p.i>=Math.max(0,last-155));
+  const start=recent.length?Math.max(0,recent[0].i-8):Math.max(0,last-120);
+  return {start,swings:recent};
 }
 function meaningfulDiff(a,b,atrValue){
-  return Math.max(atrValue*0.9,Math.max(a,b)*0.018);
+  return Math.max(atrValue*0.65,Math.max(a,b)*0.012);
 }
 function nearSame(a,b,atrValue){
-  return Math.abs(a-b)<=Math.max(atrValue*0.9,Math.max(a,b)*0.018);
+  return Math.abs(a-b)<=Math.max(atrValue*0.60,Math.max(a,b)*0.012);
 }
-function validateProjectedTrend(line,bars,atr,kind){
-  const lastI=bars.length-1;
-  const current=Number(bars[lastI].close);
-  const lastAtr=atrAt(atr,lastI,bars);
-  const endY=line.p1.y+line.slope*(lastI-line.p1.i);
-  if(!Number.isFinite(endY)||endY<=0) return null;
-
-  // The line must still be relevant to today's structure.
-  if(Math.abs(current-endY)>lastAtr*6.5) return null;
-
-  // Once materially broken, it is no longer the current active trendline.
-  let breaks=0;
-  for(let i=line.p2.i+1;i<=lastI;i++){
-    const y=line.p1.y+line.slope*(i-line.p1.i);
-    const tol=atrAt(atr,i,bars)*0.75;
-    if(kind==="up" && Number(bars[i].close)<y-tol) breaks++;
-    if(kind==="down" && Number(bars[i].close)>y+tol) breaks++;
+// Small local turns supplement the ATR ZigZag, which can miss compact sideways shelves.
+function localStructurePivots(bars,atr,width=3){
+  const out=[];
+  for(let i=width;i<bars.length-width;i++){
+    const hi=Number(bars[i].high),lo=Number(bars[i].low);
+    const left=bars.slice(i-width,i),right=bars.slice(i+1,i+width+1);
+    const other=[...left,...right],a=atrAt(atr,i,bars);
+    const maxH=Math.max(...other.map(b=>Number(b.high)));
+    const minL=Math.min(...other.map(b=>Number(b.low)));
+    if(hi>=maxH&&hi-minL>=a*0.85) out.push({i,y:hi,date:bars[i].date,type:"H",strength:"local"});
+    if(lo<=minL&&maxH-lo>=a*0.85) out.push({i,y:lo,date:bars[i].date,type:"L",strength:"local"});
   }
-  if(breaks>=2) return null;
-  return {...line,endY};
+  return out;
 }
-function chooseActiveTrend(swings,bars,atr,kind){
-  const type=kind==="up"?"L":"H";
-  const pts=swings.filter(s=>s.type===type&&!s.forming);
+function mergePivots(groups,from){
+  const pivots=new Map();
+  for(const group of groups){
+    for(const p of group){
+      if(p.forming||p.i<from) continue;
+      const key=p.type+":"+p.i,prior=pivots.get(key);
+      if(!prior) pivots.set(key,p);
+    }
+  }
+  return [...pivots.values()].sort((a,b)=>a.i-b.i);
+}
+function projectedY(line,i){
+  return line.p1.y+line.slope*(i-line.p1.i);
+}
+// A real trendline must stay outside most candle bodies, including BETWEEN anchors.
+function validateProjectedTrend(line,bars,atr,kind){
+  const last=bars.length-1,price=Number(bars[last].close);
+  const a=atrAt(atr,last,bars),endY=projectedY(line,last);
+  if(!Number.isFinite(endY)||endY<=0||Math.abs(price-endY)>a*5.0) return null;
+  if(kind==="up"&&endY>price+a*0.65) return null;
+  if(kind==="down"&&endY<price-a*0.65) return null;
+  let breaches=0,wicks=0;
+  for(let i=line.p1.i+1;i<=last;i++){
+    if(i===line.p2.i) continue;
+    const b=bars[i],v=atrAt(atr,i,bars),y=projectedY(line,i);
+    const bodyEdge=kind==="up"?Math.min(Number(b.open),Number(b.close)):Math.max(Number(b.open),Number(b.close));
+    const wickEdge=kind==="up"?Number(b.low):Number(b.high);
+    const bodyPen=kind==="up"?y-bodyEdge:bodyEdge-y;
+    const wickPen=kind==="up"?y-wickEdge:wickEdge-y;
+    // Reject an intervening candle that materially cuts through the proposed support/resistance.
+    if(bodyPen>v*0.52) return null;
+    if(wickPen>v*1.15) return null;
+    if(bodyPen>v*0.18) breaches++;
+    if(wickPen>v*0.38) wicks++;
+  }
+  if(breaches>Math.max(2,Math.floor((last-line.p1.i)*0.09))) return null;
+  if(wicks>Math.max(3,Math.floor((last-line.p1.i)*0.14))) return null;
+  return {...line,endY,breaches,wicks};
+}
+function chooseActiveTrend(swings,bars,atr,kind,from){
+  const type=kind==="up"?"L":"H",pts=swings.filter(p=>p.type===type&&p.i>=from);
+  const last=bars.length-1,price=Number(bars[last].close),a=atrAt(atr,last,bars);
   let best=null;
-  for(let a=0;a<pts.length-1;a++){
-    for(let b=a+1;b<pts.length;b++){
-      const p1=pts[a],p2=pts[b];
-      if(p2.i-p1.i<6) continue;
-      const tol=atrAt(atr,p2.i,bars);
-      const diff=meaningfulDiff(p1.y,p2.y,tol);
-      if(kind==="up" && p2.y-p1.y<diff) continue;
-      if(kind==="down" && p1.y-p2.y<diff) continue;
-
-      // Near-equal highs/lows belong to horizontal resistance/support, not a sloped trendline.
-      if(nearSame(p1.y,p2.y,tol)) continue;
-
-      const slope=(p2.y-p1.y)/(p2.i-p1.i);
+  for(let x=0;x<pts.length-1;x++){
+    for(let z=x+1;z<pts.length;z++){
+      const p1=pts[x],p2=pts[z],span=p2.i-p1.i;
+      if(span<8||span>135||last-p2.i>78) continue;
+      const anchorATR=atrAt(atr,p2.i,bars);
+      if(kind==="up"&&p2.y-p1.y<meaningfulDiff(p1.y,p2.y,anchorATR)) continue;
+      if(kind==="down"&&p1.y-p2.y<meaningfulDiff(p1.y,p2.y,anchorATR)) continue;
+      const slope=(p2.y-p1.y)/span;
+      if(Math.abs(slope)*25/Math.max(p1.y,1)>0.23) continue; // Avoid near-vertical short-lived acceleration.
       const valid=validateProjectedTrend({p1,p2,slope},bars,atr,kind);
       if(!valid) continue;
-
-      let touches=2;
+      let touchCount=2,lastTouch=p2.i;
       for(const p of pts){
-        if(p.i<=p2.i) continue;
-        const y=p1.y+slope*(p.i-p1.i);
-        if(Math.abs(p.y-y)<=atrAt(atr,p.i,bars)*0.9) touches++;
+        if(p.i<=p1.i||p.i===p2.i||Math.abs(p.i-p1.i)<4||Math.abs(p.i-p2.i)<4) continue;
+        if(Math.abs(p.y-projectedY(valid,p.i))<=atrAt(atr,p.i,bars)*0.46){
+          touchCount++;
+          lastTouch=Math.max(lastTouch,p.i);
+        }
       }
-      const recency=p2.i/(bars.length-1);
-      const score=touches*35+recency*45-(bars.length-1-p2.i)*0.08;
-      if(!best||score>best.score) best={...valid,touches,score};
+      const gapATR=Math.abs(price-valid.endY)/Math.max(a,0.01);
+      const score=touchCount*26+Math.min(span,85)*0.40+
+        34/(1+gapATR*0.55)+Math.max(0,20-(last-lastTouch)*0.32)-
+        valid.breaches*8-valid.wicks*2-(touchCount===2?10:0);
+      if(!best||score>best.score) best={...valid,touches:touchCount,score,lastTouch,kind};
     }
   }
   return best;
 }
-function clusterLevels(points,bars,atr,type,current,activeStart){
-  const pts=points.filter(p=>!p.forming&&p.i>=activeStart);
+function levelClusters(pivots,bars,atr,from){
   const clusters=[];
-  for(const p of pts){
-    const tol=Math.max(atrAt(atr,p.i,bars)*0.9,p.y*0.018);
-    let cluster=clusters.find(c=>Math.abs(c.level-p.y)<=Math.max(c.tol,tol));
-    if(!cluster){
-      cluster={level:p.y,tol,points:[p]};
-      clusters.push(cluster);
-    }else{
-      cluster.points.push(p);
-      cluster.level=cluster.points.reduce((s,q)=>s+q.y,0)/cluster.points.length;
-      cluster.tol=Math.max(cluster.tol,tol);
-    }
+  for(const p of pivots.filter(p=>p.i>=from)){
+    const v=atrAt(atr,p.i,bars),tol=Math.max(v*0.48,p.y*0.009);
+    const c=clusters.find(c=>Math.abs(c.level-p.y)<=Math.min(c.tol,tol*1.15)
+      && Math.abs(c.level-p.y)<=v*0.85);
+    if(c){
+      if(!c.points.some(q=>q.i===p.i&&q.type===p.type)){
+        c.points.push(p);
+        c.level=c.points.reduce((sum,q)=>sum+q.y,0)/c.points.length;
+        c.tol=Math.max(c.tol,tol);
+      }
+    }else clusters.push({level:p.y,tol,points:[p]});
   }
-  return clusters.map(c=>{
-    const last=c.points[c.points.length-1];
-    const touches=c.points.length;
-    const distance=Math.abs(c.level-current)/Math.max(current,1e-9);
-    const recency=last.i/(bars.length-1);
-    return {...c,last,touches,distance,recency,
-      score:touches*28+recency*38-distance*70};
-  }).filter(c=>type==="R"?c.level>current:c.level<current);
+  return clusters;
 }
-function chooseHorizontalLevel(swings,bars,atr,type,activeStart){
-  const current=Number(bars[bars.length-1].close);
-  const pts=swings.filter(s=>s.type===(type==="R"?"H":"L"));
-  const clusters=clusterLevels(pts,bars,atr,type,current,activeStart);
-  if(!clusters.length) return null;
-
-  // Prefer the nearest still-relevant level; multiple touches and recency break ties.
-  clusters.sort((a,b)=>{
-    const da=a.distance,db=b.distance;
-    if(Math.abs(da-db)>0.025) return da-db;
-    return b.score-a.score;
-  });
-  return clusters[0];
+function chooseHorizontalLevel(pivots,bars,atr,type,from){
+  const last=bars.length-1,current=Number(bars[last].close),a=atrAt(atr,last,bars);
+  const clusters=levelClusters(pivots,bars,atr,from);
+  let best=null;
+  for(const cluster of clusters){
+    const level=cluster.level,sorted=cluster.points.slice().sort((x,y)=>x.i-y.i);
+    const spaced=[];
+    for(const p of sorted){
+      if(!spaced.length||p.i-spaced[spaced.length-1].i>=4) spaced.push(p);
+    }
+    if(spaced.length<2) continue; // A single isolated extreme is not a validated level.
+    const nearThreshold=Math.max(a*0.20,current*0.0025);
+    let side;
+    if(level<current-nearThreshold) side="S";
+    else if(level>current+nearThreshold) side="R";
+    else{
+      const recent=bars.slice(-5).filter(b=>Number(b.close)>=level).length;
+      side=recent>=3?"S":"R";
+    }
+    if(side!==type) continue;
+    const d=Math.abs(level-current)/Math.max(a,0.01);
+    if(d>10||Math.abs(level-current)/current>0.22) continue;
+    const lastTouch=spaced[spaced.length-1].i;
+    const age=last-lastTouch;
+    if(age>115) continue;
+    const fromHigh=spaced.some(p=>p.type==="H"),fromLow=spaced.some(p=>p.type==="L");
+    // Old resistance reused as support, or old support reused as resistance, counts as an extra confirmation.
+    const roleFlip=fromHigh&&fromLow;
+    const score=Math.min(spaced.length,5)*28+36/(1+d*0.6)+
+      Math.max(0,22-age*0.30)+(roleFlip?14:0);
+    const candidate={level,score,touches:spaced.length,first:spaced[0],last:spaced[spaced.length-1],roleFlip,type};
+    if(!best||candidate.score>best.score) best=candidate;
+  }
+  return best;
 }
 function autoTrendLines(bars){
-  const atr=calcATR(bars,14);
-  const major=buildSwings(bars,atr,2.6);
-  const minor=buildSwings(bars,atr,1.8);
-  const structure=activeStructure(major,bars,atr);
-  const activeStart=structure.start;
-
-  // Use major swings first; minor swings only fill in current structure detail.
-  const pool=[
-    ...major.filter(s=>s.i>=activeStart),
-    ...minor.filter(s=>s.i>=activeStart)
-  ].sort((a,b)=>a.i-b.i).filter((s,i,arr)=>i===0||s.i!==arr[i-1].i||s.type!==arr[i-1].type);
-
-  const up=chooseActiveTrend(pool,bars,atr,"up");
-  const down=chooseActiveTrend(pool,bars,atr,"down");
-  const resistance=chooseHorizontalLevel(pool,bars,atr,"R",activeStart);
-  const support=chooseHorizontalLevel(pool,bars,atr,"S",activeStart);
-
-  const shapes=[],summary=[];
-  const lastI=bars.length-1,lastDate=bars[lastI].date;
-  const structureDate=bars[Math.max(0,activeStart)]?.date||bars[0].date;
-
-  const addLine=(label,x0,y0,x1,y1,color,dash,detail)=>{
-    shapes.push({
-      type:"line",xref:"x",yref:"y",x0,y0,x1,y1,
-      line:{color,width:2.3,dash:dash||"solid"},layer:"above"
-    });
-    summary.push(label+(detail?"（"+detail+"）":""));
-  };
-
-  if(up){
-    addLine("上升切線",up.p1.date,up.p1.y,lastDate,up.endY,"#2563eb","solid",
-      up.p1.date+" → "+up.p2.date);
+  if(!Array.isArray(bars)||bars.length<20) return {shapes:[],summary:[],activeStartDate:null,majorSwings:0,minorSwings:0};
+  const atr=calcATR(bars,14),last=bars.length-1;
+  const major=buildSwings(bars,atr,2.5),minor=buildSwings(bars,atr,1.5);
+  const focusStart=Math.max(0,last-155);
+  const pool=mergePivots([major,minor,localStructurePivots(bars,atr,3)],focusStart);
+  const up=chooseActiveTrend(pool,bars,atr,"up",focusStart);
+  const down=chooseActiveTrend(pool,bars,atr,"down",focusStart);
+  const resistance=chooseHorizontalLevel(pool,bars,atr,"R",focusStart);
+  const support=chooseHorizontalLevel(pool,bars,atr,"S",focusStart);
+  const current=Number(bars[last].close),lastDate=bars[last].date;
+  const candidates=[];
+  if(up) candidates.push({label:"上升切線",score:up.score,
+    x0:up.p1.date,y0:up.p1.y,x1:lastDate,y1:up.endY,color:"#2563eb",dash:"solid",
+    detail:up.p1.date+" → "+up.p2.date+"；"+up.touches+" 點"});
+  if(down) candidates.push({label:"下降切線",score:down.score,
+    x0:down.p1.date,y0:down.p1.y,x1:lastDate,y1:down.endY,color:"#7c3aed",dash:"solid",
+    detail:down.p1.date+" → "+down.p2.date+"；"+down.touches+" 點"});
+  for(const c of [resistance,support]){
+    if(!c) continue;
+    candidates.push({label:c.type==="R"?"壓力線":"支撐線",score:c.score,
+      x0:c.first.date,y0:c.level,x1:lastDate,y1:c.level,
+      color:c.type==="R"?"#ea580c":"#111827",dash:c.type==="R"?"dot":"dash",
+      detail:c.touches+" 次測試"+(c.roleFlip?"；支撐壓力互換":"")});
   }
-  if(down){
-    addLine("下降切線",down.p1.date,down.p1.y,lastDate,down.endY,"#7c3aed","solid",
-      down.p1.date+" → "+down.p2.date);
+  // Rank across categories. A rejected/irrelevant line never gets a slot merely to make four.
+  candidates.sort((a,b)=>b.score-a.score);
+  const selected=[];
+  for(const c of candidates){
+    if(selected.length>=4) break;
+    if(selected.some(s=>s.label===c.label)) continue;
+    // Two horizontal levels at essentially the same price are redundant.
+    if((c.label==="支撐線"||c.label==="壓力線")&&selected.some(s=>
+      (s.label==="支撐線"||s.label==="壓力線")&&
+      Math.abs(s.y1-c.y1)<atrAt(atr,last,bars)*0.45)) continue;
+    selected.push(c);
   }
-  if(resistance){
-    addLine("壓力線",structureDate,resistance.level,lastDate,resistance.level,"#ea580c","dot",
-      resistance.touches+" 次測試");
-  }
-  if(support){
-    addLine("支撐線",structureDate,support.level,lastDate,support.level,"#111827","dash",
-      support.touches+" 次測試");
-  }
-
+  const order={"上升切線":0,"下降切線":1,"壓力線":2,"支撐線":3};
+  selected.sort((a,b)=>order[a.label]-order[b.label]);
   return {
-    shapes:shapes.slice(0,4),
-    summary:summary.slice(0,4),
-    activeStart,
-    activeStartDate:structureDate,
-    majorSwings:major.length,
-    minorSwings:minor.length
+    shapes:selected.map(c=>({
+      type:"line",xref:"x",yref:"y",x0:c.x0,y0:c.y0,x1:c.x1,y1:c.y1,
+      line:{color:c.color,width:2.3,dash:c.dash},layer:"above"
+    })),
+    summary:selected.map(c=>c.label+"（"+c.detail+"）"),
+    activeStart:focusStart,
+    activeStartDate:bars[focusStart].date,
+    majorSwings:major.length,minorSwings:minor.length
   };
 }
 async function loadHistory(){
