@@ -2,15 +2,17 @@
 
 個人台股投資儀表板。
 
-## GitHub Pages
-此專案已包含 `.github/workflows/pages.yml`。第一次使用時，請到：
+## GitHub Pages 部署方式
+請使用最簡單的分支部署，不使用 GitHub Actions：
 
-**Settings → Pages → Build and deployment → Source → GitHub Actions**
+1. 進入 **Settings → Pages**
+2. **Build and deployment → Source** 選 **Deploy from a branch**
+3. **Branch** 選 **main**
+4. **Folder** 選 **/(root)**
+5. 按 **Save**
 
-啟用後，網站會部署到：
+部署網址：
 
 **https://peter58501240.github.io/Pstock/**
 
-## 隱私設計
-投資本金、持股、損益等個人資料不直接寫入公開 GitHub 原始碼。
-網站從「匯入資料」頁將 JSON 儲存在瀏覽器 LocalStorage。
+網站首頁檔 `index.html` 已放在 main 分支根目錄。
