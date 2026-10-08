@@ -6,15 +6,15 @@
 <title>Pstock｜台股投資儀表板</title>
 <meta name="theme-color" content="#f5f7fb">
 <style>
-:root{--bg:#f5f7fb;--card:#fff;--text:#172033;--muted:#6b7280;--line:#e5e7eb;--red:#d92d20;--green:#07883f;--blue:#2563eb;--amber:#b45309;--shadow:0 10px 28px rgba(17,24,39,.07)}
+:root{--bg:#f5f7fb;--card:#fff;--text:#172033;--muted:#6b7280;--line:#e5e7eb;--red:#d92d20;--green:#07883f;--blue:#2563eb;--shadow:0 10px 28px rgba(17,24,39,.07)}
 *{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans TC","Microsoft JhengHei",sans-serif}
 .wrap{max-width:1180px;margin:auto;padding:18px 12px 48px}.top{display:flex;justify-content:space-between;gap:12px;align-items:flex-start}.top h1{margin:0;font-size:26px}.sub{margin-top:6px;color:var(--muted);font-size:13px}
-.badge{background:#111827;color:#fff;border-radius:999px;padding:7px 10px;font-size:12px;white-space:nowrap}
+.badges{display:flex;gap:7px;flex-wrap:wrap}.badge{background:#111827;color:#fff;border-radius:999px;padding:7px 10px;font-size:12px;white-space:nowrap}.badge.live{background:#065f46}
 .tabs{display:flex;gap:8px;overflow:auto;margin:17px 0 13px}.tab{border:1px solid var(--line);background:#fff;border-radius:11px;padding:9px 13px;font-weight:800;cursor:pointer;white-space:nowrap}.tab.active{background:#111827;color:white;border-color:#111827}
 .section{display:none}.section.active{display:block}.cards{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:10px}.card{background:var(--card);border:1px solid #edf0f4;border-radius:16px;padding:15px;box-shadow:var(--shadow)}
-.label{font-size:12px;color:var(--muted)}.value{font-size:23px;font-weight:900;margin-top:5px}.hint{font-size:11px;color:var(--muted);margin-top:4px}.red{color:var(--red)!important}.green{color:var(--green)!important}.blue{color:var(--blue)!important}.amber{color:var(--amber)!important}
+.label{font-size:12px;color:var(--muted)}.value{font-size:23px;font-weight:900;margin-top:5px}.hint{font-size:11px;color:var(--muted);margin-top:4px}.red{color:var(--red)!important}.green{color:var(--green)!important}.blue{color:var(--blue)!important}
 .grid2{display:grid;grid-template-columns:1fr 1fr;gap:10px}.table-card{padding:0;overflow:hidden}.head{display:flex;justify-content:space-between;gap:10px;align-items:center;padding:14px 16px;border-bottom:1px solid var(--line)}.title{font-size:17px;font-weight:900}.note{font-size:11px;color:var(--muted);margin-top:3px}
-.table-wrap{overflow:auto}table{width:100%;border-collapse:collapse;min-width:840px}th,td{padding:11px 12px;border-bottom:1px solid #eef0f3;text-align:right;font-size:13px;white-space:nowrap}th{background:#fafafa;color:#596172;font-size:11px}th:first-child,td:first-child{text-align:left}
+.table-wrap{overflow:auto}table{width:100%;border-collapse:collapse;min-width:880px}th,td{padding:11px 12px;border-bottom:1px solid #eef0f3;text-align:right;font-size:13px;white-space:nowrap}th{background:#fafafa;color:#596172;font-size:11px}th:first-child,td:first-child{text-align:left}
 .name{font-weight:850}.code{font-size:11px;color:var(--muted)}.pill{font-weight:850;border-radius:999px;padding:4px 7px;display:inline-block}.pill.red{background:#fff1f0}.pill.green{background:#effbf3}.rank{display:inline-flex;width:25px;height:25px;align-items:center;justify-content:center;border-radius:8px;background:#f3f4f6;font-weight:900;margin-right:7px}.rank.top{background:#fff7ed;color:#c2410c}
 .row{display:flex;justify-content:space-between;gap:10px;padding:10px 0;border-bottom:1px dashed var(--line)}.row:last-child{border-bottom:0}.row .l{color:var(--muted)}.row .r{font-weight:850}
 .notice{background:linear-gradient(135deg,#111827,#28364f);color:white;border-radius:16px;padding:18px}.notice strong{font-size:21px}.notice small{opacity:.78}
@@ -26,8 +26,8 @@
 <body>
 <div class="wrap">
   <div class="top">
-    <div><h1>📊 Pstock 台股投資儀表板</h1><div class="sub">台股紅漲綠跌｜庫存、已實現損益、現金水位與交易費用</div></div>
-    <span class="badge">資料日：2026/10/07</span>
+    <div><h1>📊 Pstock 台股投資儀表板</h1><div class="sub">每日收盤後自動更新｜台股紅漲綠跌｜庫存、已實現損益、現金與費用</div></div>
+    <div class="badges"><span class="badge live">● 自動更新</span><span class="badge" id="marketDate">股價資料：讀取中</span></div>
   </div>
 
   <div class="tabs">
@@ -41,44 +41,44 @@
     <div class="cards">
       <div class="card"><div class="label">核心股票本金</div><div class="value">300,000</div><div class="hint">固定績效基準</div></div>
       <div class="card"><div class="label">累積已實現投資收益</div><div class="value red">+89,388</div><div class="hint">交易＋股息＋折讓等</div></div>
-      <div class="card"><div class="label">未實現損益</div><div class="value red">+5,027</div><div class="hint">2026/10/07 收盤</div></div>
-      <div class="card"><div class="label">交割後現金</div><div class="value blue">5,831</div><div class="hint">含 10/07 新增 00935 100股</div></div>
+      <div class="card"><div class="label">未實現損益</div><div id="unrealized" class="value">--</div><div class="hint">依最新收盤價自動計算</div></div>
+      <div class="card"><div class="label">交割後現金</div><div class="value blue">5,831</div><div class="hint">交易異動時由對帳更新</div></div>
     </div>
     <div class="cards">
-      <div class="card"><div class="label">目前股票市值</div><div class="value">348,984</div></div>
-      <div class="card"><div class="label">股票總成本</div><div class="value">343,957</div></div>
-      <div class="card"><div class="label">總投資損益</div><div class="value red">+94,415</div></div>
-      <div class="card"><div class="label">總報酬率</div><div class="value red">+31.47%</div></div>
+      <div class="card"><div class="label">目前股票市值</div><div id="marketValue" class="value">--</div></div>
+      <div class="card"><div class="label">股票總成本</div><div id="stockCost" class="value">343,957</div></div>
+      <div class="card"><div class="label">總投資損益</div><div id="totalPnl" class="value">--</div></div>
+      <div class="card"><div class="label">總報酬率</div><div id="totalReturn" class="value">--</div></div>
     </div>
     <div class="grid2">
       <div class="card">
         <div class="title">帳戶結構</div>
-        <div class="row"><span class="l">目前實際帳戶資產</span><span class="r">354,815</span></div>
+        <div class="row"><span class="l">目前實際帳戶資產</span><span id="actualAssets" class="r">--</span></div>
         <div class="row"><span class="l">先前淨挪作私用</span><span class="r green">39,600</span></div>
-        <div class="row"><span class="l">還原後總資產</span><span class="r red">394,415</span></div>
+        <div class="row"><span class="l">還原後總資產</span><span id="restoredAssets" class="r">--</span></div>
       </div>
       <div class="notice">
         <small>目前績效摘要</small><br>
-        <strong>累積獲利 +94,415 元</strong>
-        <div style="margin-top:8px">總報酬率 <b>+31.47%</b> ｜ 現金 <b>5,831 元</b></div>
-        <small style="display:block;margin-top:12px">若要恢復「30萬本金完全未挪用」的狀態，需補回 39,600 元。</small>
+        <strong id="summaryPnl">計算中</strong>
+        <div id="summarySub" style="margin-top:8px"></div>
+        <small id="sourceNote" style="display:block;margin-top:12px">股價來源：TWSE／TPEx 官方資料。</small>
       </div>
     </div>
     <div class="summarybar">
-      <div class="mini"><div class="k">庫存最佳</div><div class="v red">世界 +20.08%</div></div>
-      <div class="mini"><div class="k">庫存最弱</div><div class="v green">松翰 -17.53%</div></div>
+      <div class="mini"><div class="k">庫存最佳</div><div id="bestHolding" class="v">--</div></div>
+      <div class="mini"><div class="k">庫存最弱</div><div id="worstHolding" class="v">--</div></div>
       <div class="mini"><div class="k">已實現冠軍</div><div class="v red">0050 +46,133</div></div>
     </div>
   </section>
 
   <section id="holdings" class="section">
     <div class="card table-card">
-      <div class="head"><div><div class="title">目前庫存損益表</div><div class="note">未實現損益不含未來賣出費用</div></div></div>
+      <div class="head"><div><div class="title">目前庫存損益表</div><div class="note">收盤價每日自動更新；未實現損益不含未來賣出費用</div></div><button id="refreshBtn" class="btn">重新讀取股價</button></div>
       <div class="table-wrap">
         <table>
-          <thead><tr><th>股票</th><th>股數</th><th>平均成本</th><th>投資成本</th><th>收盤價</th><th>現值</th><th>未實現損益</th><th>報酬率</th></tr></thead>
+          <thead><tr><th>股票</th><th>股數</th><th>平均成本</th><th>投資成本</th><th>最新收盤</th><th>現值</th><th>未實現損益</th><th>報酬率</th><th>來源</th></tr></thead>
           <tbody id="holdingsRows"></tbody>
-          <tfoot><tr style="font-weight:900;background:#fafafa"><td>股票合計</td><td></td><td></td><td>343,957</td><td></td><td>348,984</td><td class="red">+5,027</td><td class="red">+1.46%</td></tr></tfoot>
+          <tfoot><tr style="font-weight:900;background:#fafafa"><td>股票合計</td><td></td><td></td><td>343,957</td><td></td><td id="sumValue">--</td><td id="sumPnl">--</td><td id="sumRet">--</td><td></td></tr></tfoot>
         </table>
       </div>
     </div>
@@ -105,7 +105,6 @@
         <div class="row"><span class="l">已入帳手續費折讓</span><span class="r red">-1,831</span></div>
         <div class="row"><span class="l">目前淨手續費</span><span class="r">811</span></div>
         <div class="row"><span class="l">證券交易稅</span><span class="r">1,911</span></div>
-        <div class="note" style="margin-top:9px">10/07 新增 00935 的買進手續費暫估 4 元，折讓待入帳後再修正。</div>
       </div>
       <div class="card">
         <div class="title">已實現收益拆解</div>
@@ -119,21 +118,22 @@
     </div>
   </section>
 
-  <div class="footer">Pstock｜個人投資紀錄工具｜最後更新 2026/10/07</div>
+  <div class="footer">Pstock｜股價於台股交易日收盤後自動更新</div>
 </div>
 
 <script>
+const CAPITAL=300000, REALIZED_TOTAL=89388, CASH=5831, PRIVATE_NET=39600;
 const holdings=[
-{code:"00935",name:"野村臺灣新科技50",qty:200,avg:63.29,cost:12658,close:62.95,value:12590},
-{code:"2030",name:"彰源",qty:1000,avg:39.36,cost:39356,close:36.75,value:36750},
-{code:"3481",name:"群創",qty:1000,avg:52.67,cost:52674,close:52.50,value:52500},
-{code:"3491",name:"昇達科",qty:20,avg:1739.95,cost:34799,close:1705.00,value:34100},
-{code:"4919",name:"新唐",qty:300,avg:136.19,cost:40858,close:159.50,value:47850},
-{code:"5347",name:"世界",qty:200,avg:158.23,cost:31645,close:190.00,value:38000},
-{code:"5471",name:"松翰",qty:320,avg:62.69,cost:20060,close:51.70,value:16544},
-{code:"6147",name:"頎邦",qty:200,avg:229.07,cost:45814,close:231.50,value:46300},
-{code:"6442",name:"光聖",qty:10,avg:1952.70,cost:19527,close:1815.00,value:18150},
-{code:"6706",name:"惠特",qty:300,avg:155.22,cost:46566,close:154.00,value:46200}
+{code:"00935",name:"野村臺灣新科技50",qty:200,avg:63.29,cost:12658,fallback:62.95},
+{code:"2030",name:"彰源",qty:1000,avg:39.36,cost:39356,fallback:36.75},
+{code:"3481",name:"群創",qty:1000,avg:52.67,cost:52674,fallback:52.50},
+{code:"3491",name:"昇達科",qty:20,avg:1739.95,cost:34799,fallback:1705.00},
+{code:"4919",name:"新唐",qty:300,avg:136.19,cost:40858,fallback:159.50},
+{code:"5347",name:"世界",qty:200,avg:158.23,cost:31645,fallback:190.00},
+{code:"5471",name:"松翰",qty:320,avg:62.69,cost:20060,fallback:51.70},
+{code:"6147",name:"頎邦",qty:200,avg:229.07,cost:45814,fallback:231.50},
+{code:"6442",name:"光聖",qty:10,avg:1952.70,cost:19527,fallback:1815.00},
+{code:"6706",name:"惠特",qty:300,avg:155.22,cost:46566,fallback:154.00}
 ];
 const realized=[
 {code:"0050",name:"元大台灣50",qty:1200,buy:73.55,sell:112.38,pnl:46133,ret:52.18},
@@ -157,12 +157,65 @@ const realized=[
 {code:"6133",name:"金橋",qty:1000,buy:28.10,sell:23.65,pnl:-4593,ret:-16.32},
 {code:"2610",name:"華航",qty:2000,buy:21.93,sell:18.35,pnl:-7373,ret:-16.79}
 ];
-const nf=new Intl.NumberFormat("zh-TW",{maximumFractionDigits:0});
-const sign=n=>(n>0?"+":"")+nf.format(n), pct=n=>(n>0?"+":"")+Number(n).toFixed(2)+"%", cls=n=>n>=0?"red":"green";
-document.querySelectorAll(".tab").forEach(b=>b.onclick=()=>{document.querySelectorAll(".tab").forEach(x=>x.classList.remove("active"));document.querySelectorAll(".section").forEach(x=>x.classList.remove("active"));b.classList.add("active");document.getElementById(b.dataset.tab).classList.add("active")});
-document.getElementById("holdingsRows").innerHTML=holdings.map(h=>{const p=h.value-h.cost,r=100*p/h.cost;return '<tr><td><div class="name">'+h.name+'</div><div class="code">'+h.code+'</div></td><td>'+nf.format(h.qty)+'</td><td>'+h.avg.toFixed(2)+'</td><td>'+nf.format(h.cost)+'</td><td>'+h.close.toFixed(2)+'</td><td>'+nf.format(h.value)+'</td><td><span class="pill '+cls(p)+'">'+sign(p)+'</span></td><td class="'+cls(r)+'"><b>'+pct(r)+'</b></td></tr>'}).join("");
-document.getElementById("realizedRows").innerHTML=realized.map((r,i)=>'<tr><td><span class="rank '+(i<3?"top":"")+'">'+(i+1)+'</span><span class="name">'+r.name+'</span> <span class="code">'+r.code+'</span></td><td>'+nf.format(r.qty)+'</td><td>'+r.buy.toFixed(2)+'</td><td>'+r.sell.toFixed(2)+'</td><td><span class="pill '+cls(r.pnl)+'">'+sign(r.pnl)+'</span></td><td class="'+cls(r.ret)+'"><b>'+pct(r.ret)+'</b></td></tr>').join("");
-document.getElementById("csvBtn").onclick=()=>{const rows=[["排名","代號","名稱","已賣股數","平均成本價","平均賣出價","已實現損益","報酬率"],...realized.map((r,i)=>[i+1,r.code,r.name,r.qty,r.buy,r.sell,r.pnl,r.ret+"%"])],csv="\ufeff"+rows.map(x=>x.join(",")).join("\n"),a=document.createElement("a");a.href=URL.createObjectURL(new Blob([csv],{type:"text/csv;charset=utf-8"}));a.download="Pstock-realized-2026-10-07.csv";a.click();URL.revokeObjectURL(a.href)};
+
+const $=id=>document.getElementById(id), nf=new Intl.NumberFormat("zh-TW",{maximumFractionDigits:0});
+const sign=n=>(n>0?"+":"")+nf.format(Math.round(n)), pct=n=>(n>0?"+":"")+Number(n).toFixed(2)+"%", cls=n=>n>=0?"red":"green";
+document.querySelectorAll(".tab").forEach(b=>b.onclick=()=>{document.querySelectorAll(".tab").forEach(x=>x.classList.remove("active"));document.querySelectorAll(".section").forEach(x=>x.classList.remove("active"));b.classList.add("active");$(b.dataset.tab).classList.add("active")});
+
+let pricePayload={prices:{}};
+
+async function loadPrices(){
+  try{
+    const r=await fetch("data/prices.json?ts="+Date.now(),{cache:"no-store"});
+    if(!r.ok) throw new Error("HTTP "+r.status);
+    pricePayload=await r.json();
+  }catch(e){
+    pricePayload={prices:{},errors:[String(e)],market_date:null};
+  }
+  render();
+}
+
+function render(){
+  const rows=holdings.map(h=>{
+    const p=pricePayload.prices?.[h.code];
+    const close=Number(p?.close ?? h.fallback);
+    const value=Math.round(h.qty*close);
+    const pnl=value-h.cost;
+    const ret=100*pnl/h.cost;
+    return {...h,close,value,pnl,ret,source:p?.source||"備援"};
+  });
+  const totalCost=rows.reduce((s,x)=>s+x.cost,0);
+  const marketValue=rows.reduce((s,x)=>s+x.value,0);
+  const unrealized=marketValue-totalCost;
+  const totalPnl=REALIZED_TOTAL+unrealized;
+  const totalReturn=100*totalPnl/CAPITAL;
+  const actualAssets=marketValue+CASH;
+  const restoredAssets=actualAssets+PRIVATE_NET;
+  const best=[...rows].sort((a,b)=>b.ret-a.ret)[0], worst=[...rows].sort((a,b)=>a.ret-b.ret)[0];
+
+  $("marketDate").textContent="股價資料："+(pricePayload.market_date||"備援 2026/10/07");
+  $("unrealized").textContent=sign(unrealized); $("unrealized").className="value "+cls(unrealized);
+  $("marketValue").textContent=nf.format(marketValue);
+  $("totalPnl").textContent=sign(totalPnl); $("totalPnl").className="value "+cls(totalPnl);
+  $("totalReturn").textContent=pct(totalReturn); $("totalReturn").className="value "+cls(totalReturn);
+  $("actualAssets").textContent=nf.format(actualAssets);
+  $("restoredAssets").textContent=nf.format(restoredAssets); $("restoredAssets").className="r "+cls(restoredAssets-CAPITAL);
+  $("summaryPnl").textContent="累積損益 "+sign(totalPnl)+" 元";
+  $("summarySub").innerHTML="總報酬率 <b>"+pct(totalReturn)+"</b> ｜ 現金 <b>"+nf.format(CASH)+"</b> 元";
+  $("bestHolding").textContent=best.name+" "+pct(best.ret); $("bestHolding").className="v "+cls(best.ret);
+  $("worstHolding").textContent=worst.name+" "+pct(worst.ret); $("worstHolding").className="v "+cls(worst.ret);
+  $("sumValue").textContent=nf.format(marketValue);
+  $("sumPnl").textContent=sign(unrealized); $("sumPnl").className=cls(unrealized);
+  $("sumRet").textContent=pct(100*unrealized/totalCost); $("sumRet").className=cls(unrealized);
+  if(pricePayload.updated_at) $("sourceNote").textContent="股價來源：TWSE／TPEx 官方資料。最近抓取："+pricePayload.updated_at.replace("T"," ").slice(0,19);
+
+  $("holdingsRows").innerHTML=rows.map(h=>'<tr><td><div class="name">'+h.name+'</div><div class="code">'+h.code+'</div></td><td>'+nf.format(h.qty)+'</td><td>'+h.avg.toFixed(2)+'</td><td>'+nf.format(h.cost)+'</td><td>'+h.close.toFixed(2)+'</td><td>'+nf.format(h.value)+'</td><td><span class="pill '+cls(h.pnl)+'">'+sign(h.pnl)+'</span></td><td class="'+cls(h.ret)+'"><b>'+pct(h.ret)+'</b></td><td>'+h.source+'</td></tr>').join("");
+}
+
+$("realizedRows").innerHTML=realized.map((r,i)=>'<tr><td><span class="rank '+(i<3?"top":"")+'">'+(i+1)+'</span><span class="name">'+r.name+'</span> <span class="code">'+r.code+'</span></td><td>'+nf.format(r.qty)+'</td><td>'+r.buy.toFixed(2)+'</td><td>'+r.sell.toFixed(2)+'</td><td><span class="pill '+cls(r.pnl)+'">'+sign(r.pnl)+'</span></td><td class="'+cls(r.ret)+'"><b>'+pct(r.ret)+'</b></td></tr>').join("");
+$("refreshBtn").onclick=loadPrices;
+$("csvBtn").onclick=()=>{const rows=[["排名","代號","名稱","已賣股數","平均成本價","平均賣出價","已實現損益","報酬率"],...realized.map((r,i)=>[i+1,r.code,r.name,r.qty,r.buy,r.sell,r.pnl,r.ret+"%"])],csv="\ufeff"+rows.map(x=>x.join(",")).join("\n"),a=document.createElement("a");a.href=URL.createObjectURL(new Blob([csv],{type:"text/csv;charset=utf-8"}));a.download="Pstock-realized.csv";a.click();URL.revokeObjectURL(a.href)};
+loadPrices();
 </script>
 </body>
 </html>
