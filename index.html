@@ -27,11 +27,20 @@
 .trend-toolbar{display:flex;gap:8px;flex-wrap:wrap;align-items:center;padding:12px 14px;border-bottom:1px solid var(--line)}
 .trend-toolbar select{border:1px solid var(--line);border-radius:10px;padding:8px 10px;background:#fff;font-weight:800}
 .trend-toolbar .btn.active{background:#111827;color:#fff;border-color:#111827}
-.trend-chart{height:780px;min-height:600px;touch-action:none;overscroll-behavior:contain;position:relative}
+.trend-chart{height:780px;min-height:600px;touch-action:none;overscroll-behavior:contain;position:relative;width:100%}
 .trend-cursor-price{position:absolute;z-index:20;display:none;transform:translateY(-50%);padding:3px 6px;border-radius:4px;background:#111827;color:#fff;font-size:11px;font-weight:800;line-height:1.2;pointer-events:none;white-space:nowrap;box-shadow:0 1px 3px rgba(0,0,0,.18)}
 .trend-status{padding:9px 14px;color:var(--muted);font-size:12px;border-top:1px solid var(--line)}
 .trend-help{padding:12px 14px;background:#f8fafc;border-top:1px solid var(--line);font-size:12px;line-height:1.7;color:#475569}
-@media(max-width:820px){.trend-chart{height:74vh;min-height:580px}}
+#trendPanel:fullscreen{width:100vw;height:100vh;max-width:none;margin:0;border:0;border-radius:0;background:#fff;display:flex;flex-direction:column;overflow:hidden}
+#trendPanel:fullscreen .trend-toolbar{flex:0 0 auto;padding:6px 8px;gap:6px}
+#trendPanel:fullscreen .trend-chart{flex:1 1 auto;height:auto!important;min-height:0!important;width:100%!important}
+#trendPanel:fullscreen .trend-status{display:none}
+@media(max-width:820px){
+  #trend .table-card{border-radius:12px}
+  .trend-toolbar{padding:8px 8px;gap:6px}
+  .trend-toolbar select{min-width:0;max-width:55vw}
+  .trend-chart{height:76vh;min-height:580px}
+}
 @media(max-width:820px){.cards{grid-template-columns:repeat(2,1fr)}.grid2{grid-template-columns:1fr}.top{flex-direction:column}.value{font-size:20px}.summarybar{grid-template-columns:1fr}}
 </style>
 </head>
@@ -98,13 +107,14 @@
   </section>
 
   <section id="trend" class="section">
-    <div class="card table-card">
+    <div id="trendPanel" class="card table-card">
       <div class="trend-toolbar">
         <select id="trendTicker"></select>
         <button id="panBtn" class="btn">✋ 拖曳</button>
         <button id="zoomInBtn" class="btn">＋ 放大</button>
         <button id="zoomOutBtn" class="btn">－ 縮小</button>
         <button id="resetZoomBtn" class="btn">回復視野</button>
+        <button id="fullscreenBtn" class="btn">⛶ 全螢幕橫向</button>
       </div>
       <div id="trendChart" class="trend-chart"></div>
       <div id="trendStatus" class="trend-status">歷史資料讀取中…</div>
@@ -776,6 +786,42 @@ function bindTrendCursorPrice(){
   chart.addEventListener("pointermove",update,{passive:true});
   chart.addEventListener("pointerleave",()=>{tag.style.display="none";},{passive:true});
 }
+async function toggleTrendFullscreen(){
+  const panel=$("trendPanel");
+  const btn=$("fullscreenBtn");
+  if(!document.fullscreenElement){
+    try{
+      if(panel.requestFullscreen) await panel.requestFullscreen({navigationUI:"hide"});
+      try{
+        if(screen.orientation?.lock) await screen.orientation.lock("landscape");
+      }catch(e){}
+    }catch(e){
+      // Fallback when browser blocks the Fullscreen API.
+      panel.classList.add("trend-fallback-fullscreen");
+      btn.textContent="✕ 離開全螢幕";
+    }
+  }else{
+    try{await document.exitFullscreen();}catch(e){}
+    try{screen.orientation?.unlock?.();}catch(e){}
+  }
+  setTimeout(()=>{
+    Plotly.Plots.resize($("trendChart"));
+    updateTrendDateTicks();
+    scheduleTrendAutoscale();
+  },180);
+}
+function syncTrendFullscreenUi(){
+  const btn=$("fullscreenBtn");
+  if(!btn) return;
+  btn.textContent=document.fullscreenElement?"✕ 離開全螢幕":"⛶ 全螢幕橫向";
+  setTimeout(()=>{
+    Plotly.Plots.resize($("trendChart"));
+    updateTrendDateTicks();
+    scheduleTrendAutoscale();
+  },120);
+}
+document.addEventListener("fullscreenchange",syncTrendFullscreenUi);
+
 function renderTrend(){
   if(!historyPayload) return;
   const code=$("trendTicker").value;
@@ -794,7 +840,7 @@ function renderTrend(){
   const startIndex=0;
   const initialRange=initialTrendRange();
   const isMobile=window.innerWidth<=820;
-  const chartMargin=isMobile?{l:8,r:8,t:20,b:38}:{l:52,r:64,t:30,b:42};
+  const chartMargin=isMobile?{l:0,r:0,t:16,b:30}:{l:52,r:64,t:30,b:42};
   const traces=[
     {
       type:"candlestick",name:"K線",x,
@@ -826,12 +872,14 @@ function renderTrend(){
     showlegend:true,
     legend:{orientation:"h",y:1.04,x:0},
     xaxis:{
-      type:"date",rangeslider:{visible:false},showgrid:true,gridcolor:"#eef0f3",
+      type:"date",domain:[0,1],rangeslider:{visible:false},showgrid:true,gridcolor:"#eef0f3",
       rangebreaks:[{bounds:["sat","mon"]}],
       range:initialRange||undefined,
       tickformat:"%-m/%-d",
       hoverformat:"%Y/%-m/%-d",
-      automargin:true
+      automargin:!isMobile,
+      tickangle:0,
+      ticklabeloverflow:"hide past domain"
     },
     yaxis:{
       domain:[0.27,1],side:"right",showgrid:true,gridcolor:"#eef0f3",fixedrange:false,
@@ -888,6 +936,7 @@ async function initTrendTab(){
       $("zoomInBtn").onclick=()=>zoomTrend(0.72);
       $("zoomOutBtn").onclick=()=>zoomTrend(1.38);
       $("resetZoomBtn").onclick=()=>resetTrendZoom();
+      $("fullscreenBtn").onclick=()=>toggleTrendFullscreen();
     }
     $("trendStatus").textContent="歷史資料讀取中…";
     await loadHistory();
