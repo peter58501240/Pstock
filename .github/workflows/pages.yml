@@ -35,6 +35,9 @@ jobs:
       - name: Fetch latest Taiwan closing prices
         run: python scripts/update_prices.py
 
+      - name: Fetch historical OHLCV for trendline analysis
+        run: python scripts/update_history.py
+
       - name: Setup Pages
         uses: actions/configure-pages@v5
 
