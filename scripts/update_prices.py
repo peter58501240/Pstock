@@ -7,8 +7,13 @@ from pathlib import Path
 from urllib.request import Request, urlopen
 
 SYMBOLS = {
+    # Current holdings
     "00935", "2030", "3481", "3491", "4919",
-    "5347", "5471", "6147", "6442", "6706"
+    "5347", "5471", "6147", "6442", "6706",
+    # Realized ranking: keep latest official closing prices visible
+    "0050", "0052", "8240", "2851", "2409", "4958", "4938",
+    "6290", "3016", "5011", "2353", "6443", "3013", "2504",
+    "6456", "1612", "6133", "2610"
 }
 UA = "Mozilla/5.0 (compatible; Pstock/1.0; +https://github.com/peter58501240/Pstock)"
 TZ = timezone(timedelta(hours=8))
