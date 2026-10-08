@@ -101,7 +101,7 @@
       <div class="head">
         <div>
           <div class="title">Ray 哥切線分析工作台</div>
-          <div class="note">日 K＋成交量＋MA5／10／20／60／120／240；自己畫切線，線會自動保存在這台瀏覽器</div>
+          <div class="note">日 K＋成交量＋MA5／10／20／60／120／240；系統自動找關鍵高低點，最多畫 4 條線</div>
         </div>
       </div>
       <div class="trend-toolbar">
@@ -109,17 +109,15 @@
         <button class="btn trend-period" data-days="183">6M</button>
         <button class="btn trend-period active" data-days="365">1Y</button>
         <button class="btn trend-period" data-days="730">2Y</button>
-        <button id="drawLineBtn" class="btn">✏️ 畫切線</button>
         <button id="panBtn" class="btn">✋ 拖曳</button>
         <button id="zoomInBtn" class="btn">＋ 放大</button>
         <button id="zoomOutBtn" class="btn">－ 縮小</button>
         <button id="resetZoomBtn" class="btn">回復視野</button>
-        <button id="clearLinesBtn" class="btn">清除全部切線</button>
       </div>
       <div id="trendChart" class="trend-chart"></div>
       <div id="trendStatus" class="trend-status">歷史資料讀取中…</div>
       <div class="trend-help">
-        使用方式：按「畫切線」後拖曳畫線；線的兩個端點會自動吸附到最接近那根 K 棒的「最高價或最低價」。電腦可用滾輪縮放；手機可雙指縮放，也可用「＋／－」按鈕。不同股票的切線會分開保存。
+        自動畫線規則：上升切線連接有效墊高低點；下降切線連接有效降低高點；壓力線尋找多次受阻的水平高點；失敗線優先取最近突破點，找不到時回退到最近關鍵低點。最多同時顯示 4 條。電腦可用滾輪縮放；手機可雙指縮放，也可用「＋／－」按鈕。
       </div>
     </div>
   </section>
@@ -330,63 +328,9 @@ function render(){
 let historyPayload=null;
 let trendDays=365;
 let trendInitialized=false;
-let trendListenerBound=false;
-let trendSnapping=false;
 let currentTrendBars=[];
 let pinchState=null;
 
-function savedShapesKey(code){return "pstock-trendlines-"+code;}
-function loadSavedShapes(code){
-  try{return JSON.parse(localStorage.getItem(savedShapesKey(code))||"[]");}
-  catch(e){return [];}
-}
-function saveCurrentShapes(){
-  const code=$("trendTicker").value;
-  const chart=$("trendChart");
-  if(!code||!chart?.layout) return;
-  const shapes=chart.layout.shapes||[];
-  localStorage.setItem(savedShapesKey(code),JSON.stringify(shapes));
-}
-function nearestBarIndexByDate(bars,x){
-  const t=new Date(x).getTime();
-  if(!Number.isFinite(t)||!bars.length) return -1;
-  let best=0,bestDiff=Infinity;
-  for(let i=0;i<bars.length;i++){
-    const d=Math.abs(new Date(bars[i].date+"T00:00:00").getTime()-t);
-    if(d<bestDiff){bestDiff=d;best=i;}
-  }
-  return best;
-}
-function snapEndpoint(bars,x,y){
-  const i=nearestBarIndexByDate(bars,x);
-  if(i<0) return {x,y};
-  const b=bars[i];
-  const high=Number(b.high), low=Number(b.low), yy=Number(y);
-  const target=Math.abs(yy-high)<=Math.abs(yy-low)?high:low;
-  return {x:b.date,y:target};
-}
-async function snapTrendLines(){
-  if(trendSnapping) return;
-  const chart=$("trendChart");
-  if(!chart?.layout?.shapes?.length||!currentTrendBars.length) return;
-  const shapes=chart.layout.shapes;
-  let changed=false;
-  const snapped=shapes.map(s=>{
-    if(s.type!=="line"||s.x0==null||s.x1==null||s.y0==null||s.y1==null) return s;
-    const a=snapEndpoint(currentTrendBars,s.x0,s.y0);
-    const b=snapEndpoint(currentTrendBars,s.x1,s.y1);
-    if(a.x!==s.x0||b.x!==s.x1||Number(a.y)!==Number(s.y0)||Number(b.y)!==Number(s.y1)) changed=true;
-    return {...s,x0:a.x,y0:a.y,x1:b.x,y1:b.y};
-  });
-  if(!changed){saveCurrentShapes();return;}
-  trendSnapping=true;
-  try{
-    await Plotly.relayout(chart,{shapes:snapped});
-    saveCurrentShapes();
-  }finally{
-    trendSnapping=false;
-  }
-}
 function currentXRange(){
   const chart=$("trendChart");
   const r=chart?.layout?.xaxis?.range;
@@ -442,6 +386,138 @@ function calcMA(bars,n){
   }
   return out;
 }
+function findPivots(bars){
+  const w=Math.max(3,Math.min(7,Math.round(bars.length/70)));
+  const highs=[],lows=[];
+  for(let i=w;i<bars.length-w;i++){
+    const hi=Number(bars[i].high),lo=Number(bars[i].low);
+    let isHigh=true,isLow=true,strictHigh=false,strictLow=false;
+    for(let j=i-w;j<=i+w;j++){
+      if(j===i) continue;
+      const h=Number(bars[j].high),l=Number(bars[j].low);
+      if(h>hi) isHigh=false;
+      if(h<hi) strictHigh=true;
+      if(l<lo) isLow=false;
+      if(l>lo) strictLow=true;
+      if(!isHigh&&!isLow) break;
+    }
+    if(isHigh&&strictHigh) highs.push({i,date:bars[i].date,y:hi});
+    if(isLow&&strictLow) lows.push({i,date:bars[i].date,y:lo});
+  }
+  return {highs,lows};
+}
+function chooseTrendLine(points,bars,kind){
+  const pts=points.slice(-14);
+  let best=null;
+  for(let a=0;a<pts.length-1;a++){
+    for(let b=a+1;b<pts.length;b++){
+      const p1=pts[a],p2=pts[b],span=p2.i-p1.i;
+      if(span<8) continue;
+      const slope=(p2.y-p1.y)/span;
+      if(kind==="up"&&slope<=0) continue;
+      if(kind==="down"&&slope>=0) continue;
+      let touches=0,violations=0;
+      for(let k=p1.i;k<bars.length;k++){
+        const line=p1.y+slope*(k-p1.i);
+        if(line<=0) continue;
+        const actual=kind==="up"?Number(bars[k].low):Number(bars[k].high);
+        const rel=(actual-line)/line;
+        if(kind==="up"&&rel<-0.018) violations++;
+        if(kind==="down"&&rel>0.018) violations++;
+        if(Math.abs(rel)<=0.012) touches++;
+      }
+      const allowance=Math.max(1,Math.floor((bars.length-p1.i)*0.025));
+      if(violations>allowance) continue;
+      const recency=p2.i/bars.length;
+      const score=touches*24+span*0.22+recency*30-violations*40;
+      if(!best||score>best.score) best={p1,p2,slope,score,touches,violations};
+    }
+  }
+  return best;
+}
+function resistanceCandidates(highs,bars){
+  const pts=highs.slice(-20);
+  const out=[];
+  for(const p of pts){
+    const cluster=pts.filter(q=>Math.abs(q.y-p.y)/p.y<=0.018);
+    if(cluster.length<2) continue;
+    const first=cluster[0],last=cluster[cluster.length-1];
+    if(last.i-first.i<10) continue;
+    const level=cluster.reduce((s,q)=>s+q.y,0)/cluster.length;
+    out.push({level,first,last,touches:cluster.length});
+  }
+  const uniq=[];
+  for(const c of out.sort((a,b)=>b.touches-a.touches||b.last.i-a.last.i)){
+    if(!uniq.some(u=>Math.abs(u.level-c.level)/c.level<0.012)) uniq.push(c);
+  }
+  return uniq;
+}
+function chooseResistance(highs,bars){
+  const current=Number(bars[bars.length-1].close);
+  const cs=resistanceCandidates(highs,bars)
+    .filter(c=>c.level>=current*0.97)
+    .map(c=>({...c,score:c.touches*35+c.last.i*0.18-Math.abs(c.level-current)/current*18}));
+  return cs.sort((a,b)=>b.score-a.score)[0]||null;
+}
+function chooseFailureLine(highs,lows,bars){
+  let best=null;
+  for(const p of highs.slice(-20)){
+    for(let j=p.i+1;j<bars.length;j++){
+      const prev=j>0?Number(bars[j-1].close):Number(bars[j].close);
+      const now=Number(bars[j].close);
+      if(prev<=p.y*1.005&&now>p.y*1.005){
+        if(bars.length-1-j<=65){
+          const latest=Number(bars[bars.length-1].close);
+          if(latest>=p.y*0.985 && (!best||j>best.breakI)){
+            best={level:p.y,startI:p.i,breakI:j,source:"突破點"};
+          }
+        }
+        break;
+      }
+    }
+  }
+  if(best) return best;
+  const current=Number(bars[bars.length-1].close);
+  const recent=[...lows].reverse().find(p=>p.y<current);
+  return recent?{level:recent.y,startI:recent.i,breakI:recent.i,source:"關鍵低點"}:null;
+}
+function autoTrendLines(bars){
+  const {highs,lows}=findPivots(bars);
+  const up=chooseTrendLine(lows,bars,"up");
+  const down=chooseTrendLine(highs,bars,"down");
+  const resistance=chooseResistance(highs,bars);
+  const failure=chooseFailureLine(highs,lows,bars);
+  const shapes=[],annotations=[],summary=[];
+  const lastI=bars.length-1,lastDate=bars[lastI].date;
+  const addLine=(label,x0,y0,x1,y1,color,dash,detail)=>{
+    shapes.push({
+      type:"line",xref:"x",yref:"y",x0,y0,x1,y1,
+      line:{color,width:2.2,dash:dash||"solid"},
+      layer:"above"
+    });
+    annotations.push({
+      x:x1,y:y1,xref:"x",yref:"y",text:label+" "+Number(y1).toFixed(2),
+      showarrow:false,xanchor:"right",xshift:-4,yshift:10,
+      font:{size:11,color},bgcolor:"rgba(255,255,255,.86)",bordercolor:color,borderwidth:1,borderpad:3
+    });
+    summary.push(label+(detail?"（"+detail+"）":""));
+  };
+  if(up){
+    const endY=up.p1.y+up.slope*(lastI-up.p1.i);
+    addLine("上升切線",up.p1.date,up.p1.y,lastDate,endY,"#2563eb","solid",up.p1.date+" → "+up.p2.date);
+  }
+  if(down){
+    const endY=down.p1.y+down.slope*(lastI-down.p1.i);
+    addLine("下降切線",down.p1.date,down.p1.y,lastDate,endY,"#7c3aed","solid",down.p1.date+" → "+down.p2.date);
+  }
+  if(resistance){
+    addLine("壓力線",resistance.first.date,resistance.level,lastDate,resistance.level,"#ea580c","dot",resistance.touches+" 次接近");
+  }
+  if(failure){
+    addLine("失敗線",bars[failure.startI].date,failure.level,lastDate,failure.level,"#111827","dash",failure.source);
+  }
+  return {shapes:shapes.slice(0,4),annotations:annotations.slice(0,4),summary:summary.slice(0,4),pivotCount:highs.length+lows.length};
+}
 async function loadHistory(){
   if(historyPayload) return historyPayload;
   const r=await fetch("data/history.json?ts="+Date.now(),{cache:"no-store"});
@@ -467,6 +543,7 @@ function renderTrend(){
   const x=view.map(b=>b.date);
   const maNs=[5,10,20,60,120,240];
   const maAll=Object.fromEntries(maNs.map(n=>[n,calcMA(bars,n)]));
+  const auto=autoTrendLines(view);
   const traces=[
     {
       type:"candlestick",name:"K線",x,
@@ -501,31 +578,23 @@ function renderTrend(){
     },
     yaxis:{domain:[0.27,1],side:"right",showgrid:true,gridcolor:"#eef0f3",fixedrange:false},
     yaxis2:{domain:[0,0.20],side:"right",showgrid:true,gridcolor:"#f3f4f6",fixedrange:false},
-    shapes:loadSavedShapes(code),
-    newshape:{line:{color:"#2563eb",width:2}},
+    shapes:auto.shapes,
+    annotations:auto.annotations,
     uirevision:code+"-"+trendDays
   };
   const config={
-    responsive:true,displaylogo:false,scrollZoom:true,editable:true,
-    modeBarButtonsToAdd:["drawline","drawopenpath","drawrect","eraseshape"],
-    modeBarButtonsToRemove:["lasso2d","select2d"]
+    responsive:true,displaylogo:false,scrollZoom:true,editable:false,
+    modeBarButtonsToRemove:["lasso2d","select2d","drawline","drawopenpath","drawrect","eraseshape"]
   };
   const chart=$("trendChart");
   const p=trendInitialized?Plotly.react(chart,traces,layout,config):Plotly.newPlot(chart,traces,layout,config);
   Promise.resolve(p).then(()=>{
     trendInitialized=true;
-    if(!trendListenerBound){
-      chart.on("plotly_relayout",()=>{
-        if(trendSnapping) return;
-        clearTimeout(chart._pstockSnapTimer);
-        chart._pstockSnapTimer=setTimeout(()=>snapTrendLines(),80);
-      });
-      trendListenerBound=true;
-    }
     bindTrendPinch();
     setTimeout(()=>Plotly.Plots.resize(chart),50);
   });
-  $("trendStatus").textContent=info.name+" "+code+"｜"+view[0].date+" ～ "+view[view.length-1].date+"｜"+view.length+" 根日K｜切線端點：自動吸附高／低點｜資料："+(historyPayload.source||"歷史日線");
+  const lineText=auto.summary.length?auto.summary.join("、"):"目前沒有找到足夠明確的切線";
+  $("trendStatus").textContent=info.name+" "+code+"｜"+view[0].date+" ～ "+view[view.length-1].date+"｜"+view.length+" 根日K｜自動線："+lineText+"｜資料："+(historyPayload.source||"歷史日線");
 }
 async function initTrendTab(){
   try{
@@ -539,16 +608,10 @@ async function initTrendTab(){
         trendDays=Number(btn.dataset.days);
         renderTrend();
       });
-      $("drawLineBtn").onclick=()=>Plotly.relayout("trendChart",{dragmode:"drawline"});
       $("panBtn").onclick=()=>Plotly.relayout("trendChart",{dragmode:"pan"});
       $("zoomInBtn").onclick=()=>zoomTrend(0.72);
       $("zoomOutBtn").onclick=()=>zoomTrend(1.38);
       $("resetZoomBtn").onclick=()=>resetTrendZoom();
-      $("clearLinesBtn").onclick=()=>{
-        const code=$("trendTicker").value;
-        localStorage.removeItem(savedShapesKey(code));
-        Plotly.relayout("trendChart",{shapes:[]});
-      };
     }
     $("trendStatus").textContent="歷史資料讀取中…";
     await loadHistory();
