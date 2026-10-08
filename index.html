@@ -766,8 +766,9 @@ function bindTrendCursorPrice(){
       return;
     }
     const plotRight=(Number(xa._offset)||0)+(Number(xa._length)||0);
+    const mobile=window.innerWidth<=820;
     tag.textContent=price.toFixed(2);
-    tag.style.left=(plotRight+7)+"px";
+    tag.style.left=(mobile?Math.max(4,plotRight-52):plotRight+7)+"px";
     tag.style.top=py+"px";
     tag.style.display="block";
   };
@@ -792,7 +793,8 @@ function renderTrend(){
   const auto=autoTrendLines(view);
   const startIndex=0;
   const initialRange=initialTrendRange();
-  const chartMargin=window.innerWidth<=820?{l:34,r:100,t:26,b:40}:{l:52,r:122,t:30,b:42};
+  const isMobile=window.innerWidth<=820;
+  const chartMargin=isMobile?{l:8,r:8,t:20,b:38}:{l:52,r:64,t:30,b:42};
   const traces=[
     {
       type:"candlestick",name:"K線",x,
@@ -831,14 +833,22 @@ function renderTrend(){
       hoverformat:"%Y/%-m/%-d",
       automargin:true
     },
-    yaxis:{domain:[0.27,1],side:"right",showgrid:true,gridcolor:"#eef0f3",fixedrange:false,automargin:true},
-    yaxis2:{domain:[0,0.20],side:"right",showgrid:true,gridcolor:"#f3f4f6",fixedrange:false},
+    yaxis:{
+      domain:[0.27,1],side:"right",showgrid:true,gridcolor:"#eef0f3",fixedrange:false,
+      automargin:!isMobile,ticklabelposition:isMobile?"inside":"outside",
+      ticks:isMobile?"inside":"outside",ticklen:isMobile?4:5,tickfont:{size:isMobile?11:12}
+    },
+    yaxis2:{
+      domain:[0,0.20],side:"right",showgrid:true,gridcolor:"#f3f4f6",fixedrange:false,
+      automargin:!isMobile,ticklabelposition:isMobile?"inside":"outside",
+      ticks:isMobile?"inside":"outside",ticklen:isMobile?4:5,tickfont:{size:isMobile?11:12}
+    },
     shapes:auto.shapes,
     annotations:[],
     uirevision:code
   };
   const config={
-    responsive:true,displaylogo:false,scrollZoom:true,editable:false,
+    responsive:true,displaylogo:false,displayModeBar:!isMobile,scrollZoom:true,editable:false,
     modeBarButtonsToRemove:["lasso2d","select2d","drawline","drawopenpath","drawrect","eraseshape"]
   };
   const chart=$("trendChart");
