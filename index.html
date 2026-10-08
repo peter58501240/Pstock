@@ -126,10 +126,10 @@
 
   <section id="realized" class="section">
     <div class="card table-card">
-      <div class="head"><div><div class="title">已實現損益排名</div><div class="note">FIFO 配對；多筆交易依股數加權平均成本價與賣出價；最新收盤價取自 TWSE／TPEx 官方資料</div></div><button id="csvBtn" class="btn">下載 CSV</button></div>
+      <div class="head"><div><div class="title">已實現損益排名</div><div class="note">FIFO 配對；多筆交易依股數加權平均成本價與賣出價；最新價格與庫存相同：開啟頁面時抓即時價，失敗時用官方收盤價備援</div></div><button id="csvBtn" class="btn">下載 CSV</button></div>
       <div class="table-wrap">
         <table>
-          <thead><tr><th>排名 / 股票</th><th>已賣股數</th><th>平均成本價</th><th>平均賣出價</th><th>最新收盤價</th><th>已實現損益</th><th>報酬率</th></tr></thead>
+          <thead><tr><th>排名 / 股票</th><th>已賣股數</th><th>平均成本價</th><th>平均賣出價</th><th>最新價格</th><th>已實現損益</th><th>報酬率</th></tr></thead>
           <tbody id="realizedRows"></tbody>
           <tfoot><tr style="font-weight:900;background:#fafafa"><td>股票交易合計</td><td></td><td></td><td></td><td></td><td class="red">+84,791</td><td></td></tr></tfoot>
         </table>
@@ -240,7 +240,8 @@ async function loadClosingFallback(){
 }
 
 async function loadRealtime(){
-  const symbols=holdings.map(h=>"TWS:"+h.code+":STOCK").join(",");
+  const quoteCodes=[...new Set([...holdings.map(h=>h.code),...realized.map(r=>r.code)])];
+  const symbols=quoteCodes.map(code=>"TWS:"+code+":STOCK").join(",");
   const url="https://ws.api.cnyes.com/ws/api/v1/quote/quotes/"+symbols+"?column=FORMAT&_="+Date.now();
   try{
     const r=await fetch(url,{cache:"no-store",mode:"cors"});
@@ -266,6 +267,7 @@ async function loadRealtime(){
     liveOk=false;
   }
   render();
+  renderRealized();
 }
 
 function render(){
@@ -558,15 +560,17 @@ async function initTrendTab(){
 
 function renderRealized(){
   $("realizedRows").innerHTML=realized.map((r,i)=>{
+    const lp=livePrices[r.code];
     const p=pricePayload.prices?.[r.code];
-    const close=Number(p?.close);
-    const closeText=Number.isFinite(close)?close.toFixed(2):"--";
-    return '<tr><td><span class="rank '+(i<3?"top":"")+'">'+(i+1)+'</span><span class="name">'+r.name+'</span> <span class="code">'+r.code+'</span></td><td>'+nf.format(r.qty)+'</td><td>'+r.buy.toFixed(2)+'</td><td>'+r.sell.toFixed(2)+'</td><td><b>'+closeText+'</b></td><td><span class="pill '+cls(r.pnl)+'">'+sign(r.pnl)+'</span></td><td class="'+cls(r.ret)+'"><b>'+pct(r.ret)+'</b></td></tr>';
+    const px=Number(lp?.close ?? p?.close);
+    const pxText=Number.isFinite(px)?px.toFixed(2):"--";
+    const source=lp?"即時":(p?.source?"收盤":"--");
+    return '<tr><td><span class="rank '+(i<3?"top":"")+'">'+(i+1)+'</span><span class="name">'+r.name+'</span> <span class="code">'+r.code+'</span></td><td>'+nf.format(r.qty)+'</td><td>'+r.buy.toFixed(2)+'</td><td>'+r.sell.toFixed(2)+'</td><td><b>'+pxText+'</b><div class="code">'+source+'</div></td><td><span class="pill '+cls(r.pnl)+'">'+sign(r.pnl)+'</span></td><td class="'+cls(r.ret)+'"><b>'+pct(r.ret)+'</b></td></tr>';
   }).join("");
 }
 renderRealized();
 $("refreshBtn").onclick=async()=>{await loadClosingFallback();await loadRealtime();};
-$("csvBtn").onclick=()=>{const rows=[["排名","代號","名稱","已賣股數","平均成本價","平均賣出價","最新收盤價","已實現損益","報酬率"],...realized.map((r,i)=>{const close=Number(pricePayload.prices?.[r.code]?.close);return [i+1,r.code,r.name,r.qty,r.buy,r.sell,Number.isFinite(close)?close:"",r.pnl,r.ret+"%"]})],csv="\ufeff"+rows.map(x=>x.join(",")).join("\n"),a=document.createElement("a");a.href=URL.createObjectURL(new Blob([csv],{type:"text/csv;charset=utf-8"}));a.download="Pstock-realized.csv";a.click();URL.revokeObjectURL(a.href)};
+$("csvBtn").onclick=()=>{const rows=[["排名","代號","名稱","已賣股數","平均成本價","平均賣出價","最新價格","價格來源","已實現損益","報酬率"],...realized.map((r,i)=>{const lp=livePrices[r.code],p=pricePayload.prices?.[r.code],px=Number(lp?.close??p?.close);return [i+1,r.code,r.name,r.qty,r.buy,r.sell,Number.isFinite(px)?px:"",lp?"即時":(p?.source?"收盤":""),r.pnl,r.ret+"%"]})],csv="\ufeff"+rows.map(x=>x.join(",")).join("\n"),a=document.createElement("a");a.href=URL.createObjectURL(new Blob([csv],{type:"text/csv;charset=utf-8"}));a.download="Pstock-realized.csv";a.click();URL.revokeObjectURL(a.href)};
 loadClosingFallback().then(loadRealtime);
 </script>
 </body>
