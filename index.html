@@ -687,32 +687,20 @@ function autoTrendLines(bars){
       support.touches+" 次測試");
   }
 
-  // Put labels in a dedicated lane to the right of the K chart.
-  // If price levels are close, stagger labels vertically so boxes never pile on top of candles or each other.
-  const lastAtr=atrAt(atr,lastI,bars);
-  const collision=Math.max(lastAtr*1.4,Number(bars[lastI].close)*0.018);
-  const sorted=[...labelMeta].sort((a,b)=>b.y-a.y);
-  let cluster=0,prevY=null;
-  const shifts=new Map();
-  for(const m of sorted){
-    if(prevY!==null && Math.abs(prevY-m.y)<=collision) cluster++;
-    else cluster=0;
-    const mag=Math.ceil(cluster/2)*18;
-    const shift=cluster===0?0:(cluster%2?mag:-mag);
-    shifts.set(m.label,shift);
-    prevY=m.y;
-  }
-  for(const m of labelMeta){
+  // Keep all four labels in a fixed stack in the right-side margin.
+  // This makes labels readable even when multiple lines sit at almost the same price.
+  const labelOrder={"壓力線":0,"下降切線":1,"上升切線":2,"支撐線":3};
+  const sortedLabels=[...labelMeta].sort((a,b)=>(labelOrder[a.label]??9)-(labelOrder[b.label]??9));
+  sortedLabels.forEach((m,idx)=>{
     annotations.push({
-      x:1.012,y:m.y,xref:"paper",yref:"y",
+      x:1.012,y:0.96-idx*0.075,xref:"paper",yref:"paper",
       text:m.label+" "+m.y.toFixed(2),
-      showarrow:false,xanchor:"left",yanchor:"middle",
-      yshift:shifts.get(m.label)||0,
+      showarrow:false,xanchor:"left",yanchor:"top",
       font:{size:11,color:m.color},
-      bgcolor:"rgba(255,255,255,.96)",
+      bgcolor:"rgba(255,255,255,.97)",
       bordercolor:m.color,borderwidth:1,borderpad:3
     });
-  }
+  });
 
   return {
     shapes:shapes.slice(0,4),
@@ -767,6 +755,7 @@ function renderTrend(){
       type:"scatter",mode:"lines",name:"MA"+n,x,
       y:view.map((b,j)=>maAll[n][startIndex+j]),
       line:{width:n===10?2.2:1.25},
+      visible:"legendonly",
       connectgaps:false,yaxis:"y",
       hovertemplate:"%{x|%-m/%-d}<br>MA"+n+" %{y:.2f}<extra></extra>"
     }))
