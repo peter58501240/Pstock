@@ -26,8 +26,8 @@
 <body>
 <div class="wrap">
   <div class="top">
-    <div><h1>📊 Pstock 台股投資儀表板</h1><div class="sub">盤中約每 10 秒自動更新｜台股紅漲綠跌｜庫存、已實現損益、現金與費用</div></div>
-    <div class="badges"><span class="badge live">● 即時更新</span><span class="badge" id="marketDate">股價資料：讀取中</span></div>
+    <div><h1>📊 Pstock 台股投資儀表板</h1><div class="sub">開啟或重新整理時更新最新股價｜台股紅漲綠跌｜庫存、已實現損益、現金與費用</div></div>
+    <div class="badges"><span class="badge live">● 開啟即更新</span><span class="badge" id="marketDate">股價資料：讀取中</span></div>
   </div>
 
   <div class="tabs">
@@ -73,7 +73,7 @@
 
   <section id="holdings" class="section">
     <div class="card table-card">
-      <div class="head"><div><div class="title">目前庫存損益表</div><div class="note">盤中約每 10 秒更新；收盤後保留最後成交／收盤價；未實現損益不含未來賣出費用</div></div><button id="refreshBtn" class="btn">重新讀取股價</button></div>
+      <div class="head"><div><div class="title">目前庫存損益表</div><div class="note">開啟頁面、重新整理或按「更新股價」時抓取最新價格；未實現損益不含未來賣出費用</div></div><button id="refreshBtn" class="btn">更新股價</button></div>
       <div class="table-wrap">
         <table>
           <thead><tr><th>股票</th><th>股數</th><th>平均成本</th><th>投資成本</th><th>最新價格</th><th>現值</th><th>未實現損益</th><th>報酬率</th><th>來源</th></tr></thead>
@@ -118,7 +118,7 @@
     </div>
   </section>
 
-  <div class="footer">Pstock｜盤中即時更新，盤後以官方收盤資料備援</div>
+  <div class="footer">Pstock｜開啟或重新整理時更新，盤後以官方收盤資料備援</div>
 </div>
 
 <script>
@@ -221,11 +221,6 @@ async function loadRealtime(){
   render();
 }
 
-function scheduleRealtime(){
-  const delay=isTaiwanMarketHours()?10000:60000;
-  setTimeout(async()=>{await loadRealtime();scheduleRealtime();},delay);
-}
-
 function render(){
   const rows=holdings.map(h=>{
     const lp=livePrices[h.code];
@@ -275,7 +270,7 @@ function render(){
 $("realizedRows").innerHTML=realized.map((r,i)=>'<tr><td><span class="rank '+(i<3?"top":"")+'">'+(i+1)+'</span><span class="name">'+r.name+'</span> <span class="code">'+r.code+'</span></td><td>'+nf.format(r.qty)+'</td><td>'+r.buy.toFixed(2)+'</td><td>'+r.sell.toFixed(2)+'</td><td><span class="pill '+cls(r.pnl)+'">'+sign(r.pnl)+'</span></td><td class="'+cls(r.ret)+'"><b>'+pct(r.ret)+'</b></td></tr>').join("");
 $("refreshBtn").onclick=async()=>{await loadClosingFallback();await loadRealtime();};
 $("csvBtn").onclick=()=>{const rows=[["排名","代號","名稱","已賣股數","平均成本價","平均賣出價","已實現損益","報酬率"],...realized.map((r,i)=>[i+1,r.code,r.name,r.qty,r.buy,r.sell,r.pnl,r.ret+"%"])],csv="\ufeff"+rows.map(x=>x.join(",")).join("\n"),a=document.createElement("a");a.href=URL.createObjectURL(new Blob([csv],{type:"text/csv;charset=utf-8"}));a.download="Pstock-realized.csv";a.click();URL.revokeObjectURL(a.href)};
-loadClosingFallback().then(loadRealtime).then(scheduleRealtime);
+loadClosingFallback().then(loadRealtime);
 </script>
 </body>
 </html>
