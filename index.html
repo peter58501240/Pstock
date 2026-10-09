@@ -18,7 +18,11 @@
 .section{display:none}.section.active{display:block}.cards{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:10px}.card{background:var(--card);border:1px solid #edf0f4;border-radius:16px;padding:15px;box-shadow:var(--shadow)}
 .label{font-size:12px;color:var(--muted)}.value{font-size:23px;font-weight:900;margin-top:5px}.hint{font-size:11px;color:var(--muted);margin-top:4px}.red{color:var(--red)!important}.green{color:var(--green)!important}.blue{color:var(--blue)!important}
 .grid2{display:grid;grid-template-columns:1fr 1fr;gap:10px}.table-card{padding:0;overflow:hidden}.head{display:flex;justify-content:space-between;gap:10px;align-items:center;padding:14px 16px;border-bottom:1px solid var(--line)}.title{font-size:17px;font-weight:900}.note{font-size:11px;color:var(--muted);margin-top:3px}
-.table-wrap{overflow:auto}table{width:100%;border-collapse:collapse;min-width:880px}th,td{padding:11px 12px;border-bottom:1px solid #eef0f3;text-align:right;font-size:13px;white-space:nowrap}th{background:#fafafa;color:#596172;font-size:11px}th:first-child,td:first-child{text-align:left}
+.table-wrap{overflow:auto}
+.sortable-th{cursor:pointer;user-select:none;white-space:nowrap;transition:background .15s ease}
+.sortable-th:hover{background:#f3f6fb}
+.sortable-th .sort-arrow{display:inline-block;min-width:12px;margin-left:4px;color:#94a3b8;font-size:10px}
+.sortable-th.active-sort .sort-arrow{color:#111827}table{width:100%;border-collapse:collapse;min-width:880px}th,td{padding:11px 12px;border-bottom:1px solid #eef0f3;text-align:right;font-size:13px;white-space:nowrap}th{background:#fafafa;color:#596172;font-size:11px}th:first-child,td:first-child{text-align:left}
 .name{font-weight:850}.code{font-size:11px;color:var(--muted)}.pill{font-weight:850;border-radius:999px;padding:4px 7px;display:inline-block}.pill.red{background:#fff1f0}.pill.green{background:#effbf3}.rank{display:inline-flex;width:25px;height:25px;align-items:center;justify-content:center;border-radius:8px;background:#f3f4f6;font-weight:900;margin-right:7px}.rank.top{background:#fff7ed;color:#c2410c}
 .row{display:flex;justify-content:space-between;gap:10px;padding:10px 0;border-bottom:1px dashed var(--line)}.row:last-child{border-bottom:0}.row .l{color:var(--muted)}.row .r{font-weight:850}
 .notice{background:linear-gradient(135deg,#111827,#28364f);color:white;border-radius:16px;padding:18px}.notice strong{font-size:21px}.notice small{opacity:.78}
@@ -99,7 +103,17 @@
       <div class="head"><div><div class="title">目前庫存損益表</div><div class="note">開啟頁面、重新整理或按「更新股價」時抓取最新價格；未實現損益採券商試算口徑，已扣預估賣出手續費與證交稅</div></div><button id="refreshBtn" class="btn">更新股價</button></div>
       <div class="table-wrap">
         <table>
-          <thead><tr><th>股票</th><th>股數</th><th>平均成本</th><th>投資成本</th><th>最新價格</th><th>現值</th><th>未實現損益</th><th>報酬率</th><th>來源</th></tr></thead>
+          <thead><tr>
+  <th class="sortable-th" data-sort="name">股票<span class="sort-arrow"></span></th>
+  <th class="sortable-th" data-sort="qty">股數<span class="sort-arrow"></span></th>
+  <th class="sortable-th" data-sort="avg">平均成本<span class="sort-arrow"></span></th>
+  <th class="sortable-th" data-sort="cost">投資成本<span class="sort-arrow"></span></th>
+  <th class="sortable-th" data-sort="close">最新價格<span class="sort-arrow"></span></th>
+  <th class="sortable-th" data-sort="value">現值<span class="sort-arrow"></span></th>
+  <th class="sortable-th" data-sort="pnl">未實現損益<span class="sort-arrow"></span></th>
+  <th class="sortable-th" data-sort="ret">報酬率<span class="sort-arrow"></span></th>
+  <th class="sortable-th" data-sort="source">來源<span class="sort-arrow"></span></th>
+</tr></thead>
           <tbody id="holdingsRows"></tbody>
           <tfoot><tr style="font-weight:900;background:#fafafa"><td>股票合計</td><td></td><td></td><td>350,214</td><td></td><td id="sumValue">--</td><td id="sumPnl">--</td><td id="sumRet">--</td><td></td></tr></tfoot>
         </table>
@@ -268,6 +282,47 @@ async function loadRealtime(){
   renderRealized();
 }
 
+let holdingsSort={key:null,dir:1};
+
+function compareHoldingRows(a,b,key){
+  if(key==="name"){
+    const byName=String(a.name||"").localeCompare(String(b.name||""),"zh-Hant");
+    return byName!==0?byName:String(a.code||"").localeCompare(String(b.code||""));
+  }
+  if(key==="source") return String(a.source||"").localeCompare(String(b.source||""),"zh-Hant");
+  const av=Number(a[key]),bv=Number(b[key]);
+  if(Number.isFinite(av)&&Number.isFinite(bv)) return av-bv;
+  return 0;
+}
+function applyHoldingsSort(rows){
+  if(!holdingsSort.key) return rows;
+  return [...rows].sort((a,b)=>compareHoldingRows(a,b,holdingsSort.key)*holdingsSort.dir);
+}
+function updateHoldingsSortHeaders(){
+  document.querySelectorAll('#holdings thead .sortable-th').forEach(th=>{
+    const active=th.dataset.sort===holdingsSort.key;
+    th.classList.toggle("active-sort",active);
+    const arrow=th.querySelector(".sort-arrow");
+    if(arrow) arrow.textContent=active?(holdingsSort.dir===1?"▲":"▼"):"↕";
+  });
+}
+function bindHoldingsSort(){
+  document.querySelectorAll('#holdings thead .sortable-th').forEach(th=>{
+    if(th.dataset.sortBound==="1") return;
+    th.dataset.sortBound="1";
+    th.addEventListener("click",()=>{
+      const key=th.dataset.sort;
+      if(holdingsSort.key===key) holdingsSort.dir*=-1;
+      else {
+        holdingsSort.key=key;
+        holdingsSort.dir=(key==="name"||key==="source")?1:-1;
+      }
+      render();
+    });
+  });
+  updateHoldingsSortHeaders();
+}
+
 function render(){
   const rows=holdings.map(h=>{
     const lp=livePrices[h.code];
@@ -322,7 +377,9 @@ function render(){
     $("sourceNote").textContent="目前使用 TWSE／TPEx 官方收盤備援。最近抓取："+pricePayload.updated_at.replace("T"," ").slice(0,19);
   }
 
-  $("holdingsRows").innerHTML=rows.map(h=>'<tr><td><div class="name">'+h.name+'</div><div class="code">'+h.code+'</div></td><td>'+nf.format(h.qty)+'</td><td>'+h.avg.toFixed(2)+'</td><td>'+nf.format(h.cost)+'</td><td>'+h.close.toFixed(2)+'</td><td>'+nf.format(h.value)+'</td><td><span class="pill '+cls(h.pnl)+'">'+sign(h.pnl)+'</span></td><td class="'+cls(h.ret)+'"><b>'+pct(h.ret)+'</b></td><td>'+h.source+'</td></tr>').join("");
+  const displayRows=applyHoldingsSort(rows);
+  $("holdingsRows").innerHTML=displayRows.map(h=>'<tr><td><div class="name">'+h.name+'</div><div class="code">'+h.code+'</div></td><td>'+nf.format(h.qty)+'</td><td>'+h.avg.toFixed(2)+'</td><td>'+nf.format(h.cost)+'</td><td>'+h.close.toFixed(2)+'</td><td>'+nf.format(h.value)+'</td><td><span class="pill '+cls(h.pnl)+'">'+sign(h.pnl)+'</span></td><td class="'+cls(h.ret)+'"><b>'+pct(h.ret)+'</b></td><td>'+h.source+'</td></tr>').join("");
+  updateHoldingsSortHeaders();
 }
 
 let historyPayload=null;
@@ -965,6 +1022,7 @@ function renderRealized(){
 renderRealized();
 $("refreshBtn").onclick=async()=>{await loadClosingFallback();await loadRealtime();};
 $("csvBtn").onclick=()=>{const rows=[["排名","代號","名稱","已賣股數","平均成本價","平均賣出價","最新價格","價格來源","已實現損益","報酬率"],...realized.map((r,i)=>{const lp=livePrices[r.code],p=pricePayload.prices?.[r.code],px=Number(lp?.close??p?.close);return [i+1,r.code,r.name,r.qty,r.buy,r.sell,Number.isFinite(px)?px:"",lp?"即時":(p?.source?"收盤":""),r.pnl,r.ret+"%"]})],csv="\ufeff"+rows.map(x=>x.join(",")).join("\n"),a=document.createElement("a");a.href=URL.createObjectURL(new Blob([csv],{type:"text/csv;charset=utf-8"}));a.download="Pstock-realized.csv";a.click();URL.revokeObjectURL(a.href)};
+bindHoldingsSort();
 loadClosingFallback().then(loadRealtime);
 </script>
 </body>
