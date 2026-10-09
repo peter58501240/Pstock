@@ -746,7 +746,10 @@ function chooseActiveTrend(pivots,bars,atr,kind,priorityStart){
       if(kind==="down"&&p1.y-p2.y<meaningfulDiff(p1.y,p2.y,anchorATR)) continue;
 
       const slope=(p2.y-p1.y)/span;
-      if(Math.abs(slope)*25/Math.max(p1.y,1)>0.23) continue;
+      // Use volatility-normalized steepness instead of a fixed percentage cap.
+      // Strong recent trends (e.g. 6147 from the July low) can be steep yet perfectly valid.
+      const slopeATR=Math.abs(slope)/Math.max(anchorATR,0.01);
+      if(slopeATR>0.48) continue;
 
       const valid=validateProjectedTrend({p1,p2,slope},bars,atr,kind);
       if(!valid) continue;
@@ -770,7 +773,8 @@ function chooseActiveTrend(pivots,bars,atr,kind,priorityStart){
       const anchorAge=last-p2.i,touchAge=last-lastTouch;
       const recencyBonus=32*Math.exp(-touchAge/72);
       const anchorPenalty=Math.min(30,anchorAge*0.10);
-      const structureBonus=(p1.i>=priorityStart||lastTouch>=priorityStart)?18:0;
+      const recentPair=(p1.i>=priorityStart&&p2.i>=priorityStart);
+      const structureBonus=recentPair?30:(p1.i>=priorityStart||lastTouch>=priorityStart)?18:0;
       const spanBonus=Math.min(20,span*0.22);
       const confirmationBonus=confirmations*30;
       const gradeBonus=weaker===3?26:weaker===2?14:2;
@@ -783,10 +787,10 @@ function chooseActiveTrend(pivots,bars,atr,kind,priorityStart){
         // Two-anchor-only lines must be structurally strong and clean.
         if(weaker<=1) continue;
         if(gradeGap>1) continue;
-        if(span<16) continue;
+        if(span<14) continue;
         if(valid.breaches>0||valid.wicks>1) continue;
-        if(gapATR>3.8) continue;
-        const floor=weaker===3?112:118;
+        if(gapATR>4.2) continue;
+        const floor=weaker===3?108:(recentPair?112:118);
         if(score<floor) continue;
       }else{
         // Confirmation lets adjacent grades work together naturally.
@@ -802,6 +806,48 @@ function chooseActiveTrend(pivots,bars,atr,kind,priorityStart){
   }
   return best;
 }
+function chooseRecentEnvelopeTrend(pivots,bars,atr,kind,priorityStart){
+  const type=kind==="up"?"L":"H";
+  const last=bars.length-1;
+  const start=Math.max(priorityStart,last-95);
+  const pts=pivots.filter(p=>p.type===type&&p.i>=start);
+  let best=null;
+  for(let a=0;a<pts.length-1;a++){
+    for(let b=a+1;b<pts.length;b++){
+      const p1=pts[a],p2=pts[b],span=p2.i-p1.i;
+      if(span<7) continue;
+      const slope=(p2.y-p1.y)/span;
+      if(kind==="up"&&slope<=0) continue;
+      if(kind==="down"&&slope>=0) continue;
+      const anchorATR=atrAt(atr,p2.i,bars);
+      if(Math.abs(slope)/Math.max(anchorATR,0.01)>0.55) continue;
+      if(nearSame(p1.y,p2.y,anchorATR)) continue;
+
+      const line={p1,p2,slope};
+      const valid=validateProjectedTrend(line,bars,atr,kind);
+      if(!valid) continue;
+
+      // Count every meaningful later candle reaction, not only promoted pivots.
+      const touches=trendCandleReactions(valid,bars,atr,kind);
+      const gapATR=Math.abs(Number(bars[last].close)-valid.endY)/Math.max(atrAt(atr,last,bars),0.01);
+      if(gapATR>4.5) continue;
+      if(valid.breaches>1) continue;
+
+      const grade=(strengthRank(p1.strength)+strengthRank(p2.strength));
+      const score=72+touches.length*24+grade*8+Math.min(22,span*0.25)+
+        26/(1+gapATR*0.7)-(last-p2.i)*0.07-valid.wicks*2-valid.breaches*8;
+      const minScore=touches.length?96:112;
+      if(score<minScore) continue;
+
+      const cand={...valid,confirmations:touches.length,touches:touches.length+2,score,
+        lastTouch:touches.length?touches[touches.length-1]:p2.i,kind,
+        strength:p1.strength===p2.strength?p1.strength:"mixed-recent"};
+      if(!best||cand.score>best.score) best=cand;
+    }
+  }
+  return best;
+}
+
 function levelClusters(pivots,bars,atr){
   const clusters=[];
   for(const p of pivots){
@@ -954,8 +1000,12 @@ function autoTrendLines(bars){
   const priorityStart=reset?Math.max(0,reset.startI-5):recentPriority;
 
   // Important: full history stays eligible. priorityStart only adds score to current structure.
-  const up=chooseActiveTrend(pool,bars,atr,"up",priorityStart);
-  const down=chooseActiveTrend(pool,bars,atr,"down",priorityStart);
+  const upMain=chooseActiveTrend(pool,bars,atr,"up",priorityStart);
+  const downMain=chooseActiveTrend(pool,bars,atr,"down",priorityStart);
+  const upRecent=chooseRecentEnvelopeTrend(pool,bars,atr,"up",priorityStart);
+  const downRecent=chooseRecentEnvelopeTrend(pool,bars,atr,"down",priorityStart);
+  const up=(!upMain||(upRecent&&upRecent.score>upMain.score+4))?upRecent:upMain;
+  const down=(!downMain||(downRecent&&downRecent.score>downMain.score+4))?downRecent:downMain;
   const resistances=chooseHorizontalLevels(pool,bars,atr,"R",priorityStart,2);
   const supports=chooseHorizontalLevels(pool,bars,atr,"S",priorityStart,2);
 
