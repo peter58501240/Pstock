@@ -785,10 +785,10 @@ function levelClusters(pivots,bars,atr){
   }
   return clusters;
 }
-function chooseHorizontalLevel(pivots,bars,atr,type,priorityStart){
+function chooseHorizontalLevels(pivots,bars,atr,type,priorityStart,maxCount=2){
   const last=bars.length-1,current=Number(bars[last].close),a=atrAt(atr,last,bars);
   const clusters=levelClusters(pivots,bars,atr);
-  let best=null;
+  const candidates=[];
 
   for(const cluster of clusters){
     const level=cluster.level,sorted=cluster.points.slice().sort((x,y)=>x.i-y.i);
@@ -811,26 +811,46 @@ function chooseHorizontalLevel(pivots,bars,atr,type,priorityStart){
     const lastTouch=spaced[spaced.length-1].i;
     const age=last-lastTouch;
     const distanceATR=Math.abs(level-current)/Math.max(a,0.01);
+    const distancePct=Math.abs(level-current)/Math.max(current,0.01);
     const weightedTouches=spaced.reduce((s,p)=>s+pivotWeight(p),0);
     const fromHigh=spaced.some(p=>p.type==="H"),fromLow=spaced.some(p=>p.type==="L");
     const roleFlip=fromHigh&&fromLow;
 
-    // Continuous decay: old levels fade instead of becoming invalid on an arbitrary day.
-    const recencyBonus=30*Math.exp(-age/95);
-    const distancePenalty=Math.min(58,distanceATR*4.2);
-    const structureBonus=lastTouch>=priorityStart?14:0;
-    const score=weightedTouches*16+recencyBonus+structureBonus+(roleFlip?14:0)-distancePenalty;
+    // Relevance to current price is critical. A far historical extreme may remain a secondary level,
+    // but it should not beat a nearer level merely because it is an old major high/low.
+    const recencyBonus=34*Math.exp(-age/80);
+    const distancePenalty=Math.min(92,distanceATR*7.0+distancePct*90);
+    const nearBonus=distanceATR<=3.5?30:distanceATR<=6?14:0;
+    const structureBonus=lastTouch>=priorityStart?16:0;
+    const score=weightedTouches*15+recencyBonus+nearBonus+structureBonus+(roleFlip?14:0)-distancePenalty;
 
-    // Horizontal levels need at least two independent tests and enough present-day relevance.
-    if(score<68) continue;
+    // Keep distant levels only when they are genuinely strong; nearby levels need less historical weight.
+    const minScore=distanceATR<=4?54:distanceATR<=8?68:82;
+    if(score<minScore) continue;
 
-    const candidate={
+    candidates.push({
       level,score,touches:spaced.length,weightedTouches,
-      first:spaced[0],last:spaced[spaced.length-1],roleFlip,type
-    };
-    if(!best||candidate.score>best.score) best=candidate;
+      first:spaced[0],last:spaced[spaced.length-1],roleFlip,type,
+      distanceATR,distancePct,age
+    });
   }
-  return best;
+
+  candidates.sort((a,b)=>{
+    // For the primary level, prioritize present-day usefulness first, then strength.
+    const aNear=a.distanceATR<=6, bNear=b.distanceATR<=6;
+    if(aNear!==bNear) return aNear?-1:1;
+    if(Math.abs(a.distanceATR-b.distanceATR)>1.2) return a.distanceATR-b.distanceATR;
+    return b.score-a.score;
+  });
+
+  const selected=[];
+  for(const c of candidates){
+    if(selected.length>=maxCount) break;
+    // Do not draw two almost identical horizontal levels.
+    if(selected.some(s=>Math.abs(s.level-c.level)<Math.max(a*0.75,current*0.012))) continue;
+    selected.push(c);
+  }
+  return selected;
 }
 function autoTrendLines(bars){
   if(!Array.isArray(bars)||bars.length<20){
@@ -851,8 +871,8 @@ function autoTrendLines(bars){
   // Important: full history stays eligible. priorityStart only adds score to current structure.
   const up=chooseActiveTrend(pool,bars,atr,"up",priorityStart);
   const down=chooseActiveTrend(pool,bars,atr,"down",priorityStart);
-  const resistance=chooseHorizontalLevel(pool,bars,atr,"R",priorityStart);
-  const support=chooseHorizontalLevel(pool,bars,atr,"S",priorityStart);
+  const resistances=chooseHorizontalLevels(pool,bars,atr,"R",priorityStart,2);
+  const supports=chooseHorizontalLevels(pool,bars,atr,"S",priorityStart,2);
 
   const lastDate=bars[last].date,candidates=[];
   if(up) candidates.push({
@@ -865,35 +885,43 @@ function autoTrendLines(bars){
     color:"#7c3aed",dash:"solid",
     detail:down.strength+"；"+down.p1.date+" → "+down.p2.date+"；"+(down.confirmations?("確認 "+down.confirmations+" 次"):"兩點高品質")
   });
-  for(const h of [resistance,support]){
-    if(!h) continue;
+  resistances.forEach((h,idx)=>{
     candidates.push({
-      label:h.type==="R"?"壓力線":"支撐線",score:h.score,
+      label:idx===0?"主壓力":"次壓力",kind:"resistance",score:h.score+(idx===0?8:0),
       x0:h.first.date,y0:h.level,x1:lastDate,y1:h.level,
-      color:h.type==="R"?"#ea580c":"#111827",dash:h.type==="R"?"dot":"dash",
-      detail:h.touches+" 次測試"+(h.roleFlip?"；支撐壓力互換":"")
+      color:idx===0?"#ea580c":"rgba(234,88,12,.58)",dash:idx===0?"dot":"dashdot",
+      width:idx===0?2.3:1.5,
+      detail:h.touches+" 次測試；距現價 "+(h.distancePct*100).toFixed(1)+"%"+(h.roleFlip?"；支撐壓力互換":"")
     });
-  }
+  });
+  supports.forEach((h,idx)=>{
+    candidates.push({
+      label:idx===0?"主支撐":"次支撐",kind:"support",score:h.score+(idx===0?8:0),
+      x0:h.first.date,y0:h.level,x1:lastDate,y1:h.level,
+      color:idx===0?"#111827":"rgba(17,24,39,.55)",dash:idx===0?"dash":"dot",
+      width:idx===0?2.3:1.5,
+      detail:h.touches+" 次測試"
+    });
+  });
 
-  // Maximum four lines, but never fill a slot with a low-quality candidate.
+  // Dynamic 2–6 lines. Never force six; keep only qualified candidates.
   candidates.sort((a,b)=>b.score-a.score);
   const selected=[];
+  const caps={trend:3,resistance:2,support:2};
   for(const item of candidates){
-    if(selected.length>=4) break;
-    if(selected.some(s=>s.label===item.label)) continue;
-    if((item.label==="支撐線"||item.label==="壓力線")&&selected.some(s=>
-      (s.label==="支撐線"||s.label==="壓力線")&&
-      Math.abs(s.y1-item.y1)<atrAt(atr,last,bars)*0.45)) continue;
+    if(selected.length>=6) break;
+    const kind=item.kind||"trend";
+    if(selected.filter(s=>(s.kind||"trend")===kind).length>=caps[kind]) continue;
     selected.push(item);
   }
-  const order={"上升切線":0,"下降切線":1,"壓力線":2,"支撐線":3};
-  selected.sort((a,b)=>order[a.label]-order[b.label]);
+  const order={"上升切線":0,"下降切線":1,"主壓力":2,"次壓力":3,"主支撐":4,"次支撐":5};
+  selected.sort((a,b)=>(order[a.label]??9)-(order[b.label]??9));
 
   return {
     shapes:selected.map(item=>({
       type:"line",xref:"x",yref:"y",
       x0:item.x0,y0:item.y0,x1:item.x1,y1:item.y1,
-      line:{color:item.color,width:2.3,dash:item.dash},layer:"above"
+      line:{color:item.color,width:item.width||2.3,dash:item.dash},layer:"above"
     })),
     summary:selected.map(item=>item.label+"（"+item.detail+"）"),
     activeStart:priorityStart,
