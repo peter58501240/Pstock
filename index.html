@@ -718,7 +718,8 @@ function chooseActiveTrend(pivots,bars,atr,kind,priorityStart){
         const valid=validateProjectedTrend({p1,p2,slope},bars,atr,kind);
         if(!valid) continue;
 
-        // The third market reaction is what promotes a two-point candidate to a real trendline.
+        // A third reaction is strong confirmation, but not an absolute requirement.
+        // Two clean same-grade Major/Minor anchors may still form a valid active line.
         let confirmations=0,lastTouch=p2.i;
         for(const p of allSameType){
           if(p.i<=p2.i+4) continue;
@@ -733,7 +734,6 @@ function chooseActiveTrend(pivots,bars,atr,kind,priorityStart){
           confirmations++;
           lastTouch=Math.max(lastTouch,liveTest);
         }
-        if(confirmations<1) continue;
 
         const gapATR=Math.abs(price-valid.endY)/Math.max(lastAtr,0.01);
         const anchorAge=last-p2.i,touchAge=last-lastTouch;
@@ -741,13 +741,25 @@ function chooseActiveTrend(pivots,bars,atr,kind,priorityStart){
         const anchorPenalty=Math.min(30,anchorAge*0.10);
         const structureBonus=(p1.i>=priorityStart||lastTouch>=priorityStart)?18:0;
         const spanBonus=Math.min(20,span*0.22);
-        const score=48+confirmations*34+pivotBonus(strength)+recencyBonus+
+        const confirmationBonus=confirmations*34;
+        const score=48+confirmationBonus+pivotBonus(strength)+recencyBonus+
           28/(1+gapATR*0.65)+spanBonus+structureBonus-
           anchorPenalty-valid.breaches*8-valid.wicks*2;
 
-        // Real quality floor. A mathematically valid but weak line simply does not get drawn.
-        const minScore=strength==="major"?105:strength==="minor"?112:122;
-        if(score<minScore) continue;
+        if(confirmations===0){
+          // Local+Local with no third test is too noisy to promote.
+          if(strength==="local") continue;
+          // Unconfirmed two-anchor lines must be exceptionally clean and still relevant.
+          if(span<18) continue;
+          if(valid.breaches>0||valid.wicks>1) continue;
+          if(gapATR>3.6) continue;
+          const twoPointFloor=strength==="major"?118:124;
+          if(score<twoPointFloor) continue;
+        }else{
+          // Confirmed lines get a lower floor because the market has already retested them.
+          const confirmedFloor=strength==="major"?100:strength==="minor"?106:118;
+          if(score<confirmedFloor) continue;
+        }
 
         const candidate={...valid,confirmations,touches:confirmations+2,score,lastTouch,kind,strength};
         if(!best||candidate.score>best.score) best=candidate;
@@ -846,12 +858,12 @@ function autoTrendLines(bars){
   if(up) candidates.push({
     label:"上升切線",score:up.score,x0:up.p1.date,y0:up.p1.y,x1:lastDate,y1:up.endY,
     color:"#2563eb",dash:"solid",
-    detail:up.strength+"；"+up.p1.date+" → "+up.p2.date+"；確認 "+up.confirmations+" 次"
+    detail:up.strength+"；"+up.p1.date+" → "+up.p2.date+"；"+(up.confirmations?("確認 "+up.confirmations+" 次"):"兩點高品質")
   });
   if(down) candidates.push({
     label:"下降切線",score:down.score,x0:down.p1.date,y0:down.p1.y,x1:lastDate,y1:down.endY,
     color:"#7c3aed",dash:"solid",
-    detail:down.strength+"；"+down.p1.date+" → "+down.p2.date+"；確認 "+down.confirmations+" 次"
+    detail:down.strength+"；"+down.p1.date+" → "+down.p2.date+"；"+(down.confirmations?("確認 "+down.confirmations+" 次"):"兩點高品質")
   });
   for(const h of [resistance,support]){
     if(!h) continue;
