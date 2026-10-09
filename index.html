@@ -694,76 +694,110 @@ function currentTrendTest(line,bars,atr,kind){
 }
 // Anchors must be the same structural grade. Minor/local pivots may confirm a line,
 // but they cannot manufacture a major trendline by pairing unrelated scales.
+function strengthRank(s){return s==="major"?3:s==="minor"?2:1;}
+function trendCandleReactions(line,bars,atr,kind){
+  const out=[];
+  let lastTouch=-99;
+  const last=bars.length-1;
+  for(let i=line.p2.i+3;i<=last;i++){
+    const y=projectedY(line,i),a=atrAt(atr,i,bars);
+    const edge=kind==="up"?Number(bars[i].low):Number(bars[i].high);
+    const close=Number(bars[i].close);
+    const near=Math.abs(edge-y)<=a*0.58;
+    const held=kind==="up"?close>=y-a*0.20:close<=y+a*0.20;
+    if(!near||!held||i-lastTouch<4) continue;
+
+    // Count a touch only when price actually reacts away from the line,
+    // or when it is the current live test at the right edge.
+    let reacted=false;
+    for(let j=i;j<=Math.min(last,i+3);j++){
+      const aa=atrAt(atr,j,bars),cc=Number(bars[j].close),yy=projectedY(line,j);
+      if(kind==="up"&&cc>=yy+aa*0.50) reacted=true;
+      if(kind==="down"&&cc<=yy-aa*0.50) reacted=true;
+    }
+    if(reacted||last-i<=2){
+      out.push(i);
+      lastTouch=i;
+    }
+  }
+  return out;
+}
+
 function chooseActiveTrend(pivots,bars,atr,kind,priorityStart){
   const type=kind==="up"?"L":"H";
-  const allSameType=pivots.filter(p=>p.type===type);
+  const pts=pivots.filter(p=>p.type===type);
   const last=bars.length-1,price=Number(bars[last].close),lastAtr=atrAt(atr,last,bars);
   let best=null;
 
-  for(const strength of ["major","minor","local"]){
-    const pts=allSameType.filter(p=>p.strength===strength);
-    for(let x=0;x<pts.length-1;x++){
-      for(let z=x+1;z<pts.length;z++){
-        const p1=pts[x],p2=pts[z],span=p2.i-p1.i;
-        if(span<8) continue;
+  for(let x=0;x<pts.length-1;x++){
+    for(let z=x+1;z<pts.length;z++){
+      const p1=pts[x],p2=pts[z],span=p2.i-p1.i;
+      if(span<8) continue;
 
-        const anchorATR=atrAt(atr,p2.i,bars);
-        if(nearSame(p1.y,p2.y,anchorATR)) continue;
-        if(kind==="up"&&p2.y-p1.y<meaningfulDiff(p1.y,p2.y,anchorATR)) continue;
-        if(kind==="down"&&p1.y-p2.y<meaningfulDiff(p1.y,p2.y,anchorATR)) continue;
+      const r1=strengthRank(p1.strength),r2=strengthRank(p2.strength);
+      const gradeGap=Math.abs(r1-r2);
+      const weaker=Math.min(r1,r2);
+      // Major+Local may still qualify, but only with later market confirmation.
+      const crossGradePenalty=gradeGap===0?0:gradeGap===1?12:28;
 
-        const slope=(p2.y-p1.y)/span;
-        if(Math.abs(slope)*25/Math.max(p1.y,1)>0.23) continue;
+      const anchorATR=atrAt(atr,p2.i,bars);
+      if(nearSame(p1.y,p2.y,anchorATR)) continue;
+      if(kind==="up"&&p2.y-p1.y<meaningfulDiff(p1.y,p2.y,anchorATR)) continue;
+      if(kind==="down"&&p1.y-p2.y<meaningfulDiff(p1.y,p2.y,anchorATR)) continue;
 
-        const valid=validateProjectedTrend({p1,p2,slope},bars,atr,kind);
-        if(!valid) continue;
+      const slope=(p2.y-p1.y)/span;
+      if(Math.abs(slope)*25/Math.max(p1.y,1)>0.23) continue;
 
-        // A third reaction is strong confirmation, but not an absolute requirement.
-        // Two clean same-grade Major/Minor anchors may still form a valid active line.
-        let confirmations=0,lastTouch=p2.i;
-        for(const p of allSameType){
-          if(p.i<=p2.i+4) continue;
-          const tolerance=atrAt(atr,p.i,bars)*(p.strength==="local"?0.42:0.55);
-          if(Math.abs(p.y-projectedY(valid,p.i))<=tolerance){
-            confirmations++;
-            lastTouch=Math.max(lastTouch,p.i);
-          }
-        }
-        const liveTest=currentTrendTest(valid,bars,atr,kind);
-        if(liveTest!==null&&liveTest>p2.i+4){
-          confirmations++;
-          lastTouch=Math.max(lastTouch,liveTest);
-        }
+      const valid=validateProjectedTrend({p1,p2,slope},bars,atr,kind);
+      if(!valid) continue;
 
-        const gapATR=Math.abs(price-valid.endY)/Math.max(lastAtr,0.01);
-        const anchorAge=last-p2.i,touchAge=last-lastTouch;
-        const recencyBonus=30*Math.exp(-touchAge/75);
-        const anchorPenalty=Math.min(30,anchorAge*0.10);
-        const structureBonus=(p1.i>=priorityStart||lastTouch>=priorityStart)?18:0;
-        const spanBonus=Math.min(20,span*0.22);
-        const confirmationBonus=confirmations*34;
-        const score=48+confirmationBonus+pivotBonus(strength)+recencyBonus+
-          28/(1+gapATR*0.65)+spanBonus+structureBonus-
-          anchorPenalty-valid.breaches*8-valid.wicks*2;
-
-        if(confirmations===0){
-          // Local+Local with no third test is too noisy to promote.
-          if(strength==="local") continue;
-          // Unconfirmed two-anchor lines must be exceptionally clean and still relevant.
-          if(span<18) continue;
-          if(valid.breaches>0||valid.wicks>1) continue;
-          if(gapATR>3.6) continue;
-          const twoPointFloor=strength==="major"?118:124;
-          if(score<twoPointFloor) continue;
-        }else{
-          // Confirmed lines get a lower floor because the market has already retested them.
-          const confirmedFloor=strength==="major"?100:strength==="minor"?106:118;
-          if(score<confirmedFloor) continue;
-        }
-
-        const candidate={...valid,confirmations,touches:confirmations+2,score,lastTouch,kind,strength};
-        if(!best||candidate.score>best.score) best=candidate;
+      // Confirmation may come from later pivots OR from real candle reactions along the line.
+      const pivotTouches=[];
+      for(const p of pts){
+        if(p.i<=p2.i+4) continue;
+        const tolerance=atrAt(atr,p.i,bars)*(p.strength==="local"?0.42:0.55);
+        if(Math.abs(p.y-projectedY(valid,p.i))<=tolerance) pivotTouches.push(p.i);
       }
+      const candleTouches=trendCandleReactions(valid,bars,atr,kind);
+      const touchSet=[];
+      for(const i of [...pivotTouches,...candleTouches].sort((a,b)=>a-b)){
+        if(!touchSet.length||i-touchSet[touchSet.length-1]>=4) touchSet.push(i);
+      }
+      const confirmations=touchSet.length;
+      const lastTouch=confirmations?touchSet[touchSet.length-1]:p2.i;
+
+      const gapATR=Math.abs(price-valid.endY)/Math.max(lastAtr,0.01);
+      const anchorAge=last-p2.i,touchAge=last-lastTouch;
+      const recencyBonus=32*Math.exp(-touchAge/72);
+      const anchorPenalty=Math.min(30,anchorAge*0.10);
+      const structureBonus=(p1.i>=priorityStart||lastTouch>=priorityStart)?18:0;
+      const spanBonus=Math.min(20,span*0.22);
+      const confirmationBonus=confirmations*30;
+      const gradeBonus=weaker===3?26:weaker===2?14:2;
+
+      const score=50+confirmationBonus+gradeBonus+recencyBonus+
+        28/(1+gapATR*0.65)+spanBonus+structureBonus-
+        crossGradePenalty-anchorPenalty-valid.breaches*8-valid.wicks*2;
+
+      if(confirmations===0){
+        // Two-anchor-only lines must be structurally strong and clean.
+        if(weaker<=1) continue;
+        if(gradeGap>1) continue;
+        if(span<16) continue;
+        if(valid.breaches>0||valid.wicks>1) continue;
+        if(gapATR>3.8) continue;
+        const floor=weaker===3?112:118;
+        if(score<floor) continue;
+      }else{
+        // Confirmation lets adjacent grades work together naturally.
+        if(gradeGap>1&&confirmations<2) continue;
+        const floor=weaker===3?96:weaker===2?102:114;
+        if(score<floor) continue;
+      }
+
+      const strength=(r1===r2?p1.strength:(gradeGap===1?"mixed":"mixed-wide"));
+      const candidate={...valid,confirmations,touches:confirmations+2,score,lastTouch,kind,strength};
+      if(!best||candidate.score>best.score) best=candidate;
     }
   }
   return best;
@@ -785,6 +819,52 @@ function levelClusters(pivots,bars,atr){
   }
   return clusters;
 }
+function horizontalCandleTests(level,bars,atr,type,startI=0){
+  const hits=[];
+  let lastHit=-99;
+  const last=bars.length-1;
+  for(let i=Math.max(0,startI);i<=last;i++){
+    const a=atrAt(atr,i,bars),tol=Math.max(a*0.52,level*0.006);
+    const edge=type==="R"?Number(bars[i].high):Number(bars[i].low);
+    const close=Number(bars[i].close);
+    const near=Math.abs(edge-level)<=tol;
+    const respected=type==="R"?close<=level+tol*0.45:close>=level-tol*0.45;
+    if(near&&respected&&i-lastHit>=3){
+      hits.push(i);
+      lastHit=i;
+    }
+  }
+  return hits;
+}
+function recentEmergingLevel(pivots,bars,atr,type){
+  const last=bars.length-1,current=Number(bars[last].close),a=atrAt(atr,last,bars);
+  const wanted=type==="R"?"H":"L";
+  const recent=pivots.filter(p=>p.type===wanted&&last-p.i<=24);
+  let best=null;
+  for(const p of recent){
+    const distancePct=Math.abs(p.y-current)/Math.max(current,0.01);
+    const distanceATR=Math.abs(p.y-current)/Math.max(a,0.01);
+    if(distancePct>0.09||distanceATR>5.2) continue;
+
+    // Require a visible reaction away from the level after the pivot.
+    let reaction=0;
+    for(let j=p.i+1;j<=Math.min(last,p.i+6);j++){
+      const cc=Number(bars[j].close);
+      reaction=Math.max(reaction,type==="R"?p.y-cc:cc-p.y);
+    }
+    if(reaction<atrAt(atr,p.i,bars)*0.65) continue;
+
+    const tests=horizontalCandleTests(p.y,bars,atr,type,Math.max(0,p.i-35));
+    const score=78+tests.length*12+18*Math.exp(-(last-p.i)/18)-distanceATR*5+pivotWeight(p)*5;
+    const cand={
+      level:p.y,score,touches:Math.max(1,tests.length),weightedTouches:pivotWeight(p),
+      first:p,last:p,roleFlip:false,type,distanceATR,distancePct,age:last-p.i,emerging:true
+    };
+    if(!best||cand.score>best.score) best=cand;
+  }
+  return best;
+}
+
 function chooseHorizontalLevels(pivots,bars,atr,type,priorityStart,maxCount=2){
   const last=bars.length-1,current=Number(bars[last].close),a=atrAt(atr,last,bars);
   const clusters=levelClusters(pivots,bars,atr);
@@ -796,7 +876,6 @@ function chooseHorizontalLevels(pivots,bars,atr,type,priorityStart,maxCount=2){
     for(const p of sorted){
       if(!spaced.length||p.i-spaced[spaced.length-1].i>=4) spaced.push(p);
     }
-    if(spaced.length<2) continue;
 
     const nearThreshold=Math.max(a*0.20,current*0.0025);
     let side;
@@ -808,47 +887,53 @@ function chooseHorizontalLevels(pivots,bars,atr,type,priorityStart,maxCount=2){
     }
     if(side!==type) continue;
 
-    const lastTouch=spaced[spaced.length-1].i;
+    const rawTests=horizontalCandleTests(level,bars,atr,type,Math.max(0,(spaced[0]?.i??last)-45));
+    if(spaced.length<2&&rawTests.length<2) continue;
+
+    const lastTouch=Math.max(spaced[spaced.length-1]?.i??0,rawTests[rawTests.length-1]??0);
     const age=last-lastTouch;
     const distanceATR=Math.abs(level-current)/Math.max(a,0.01);
     const distancePct=Math.abs(level-current)/Math.max(current,0.01);
-    const weightedTouches=spaced.reduce((s,p)=>s+pivotWeight(p),0);
+    const weightedTouches=spaced.reduce((s,p)=>s+pivotWeight(p),0)+Math.max(0,rawTests.length-spaced.length);
     const fromHigh=spaced.some(p=>p.type==="H"),fromLow=spaced.some(p=>p.type==="L");
     const roleFlip=fromHigh&&fromLow;
+    const totalTests=Math.max(spaced.length,rawTests.length);
 
-    // Relevance to current price is critical. A far historical extreme may remain a secondary level,
-    // but it should not beat a nearer level merely because it is an old major high/low.
-    const recencyBonus=34*Math.exp(-age/80);
-    const distancePenalty=Math.min(92,distanceATR*7.0+distancePct*90);
-    const nearBonus=distanceATR<=3.5?30:distanceATR<=6?14:0;
+    const recencyBonus=36*Math.exp(-age/75);
+    const distancePenalty=Math.min(96,distanceATR*7.2+distancePct*95);
+    const nearBonus=distanceATR<=3.5?34:distanceATR<=6?15:0;
     const structureBonus=lastTouch>=priorityStart?16:0;
-    const score=weightedTouches*15+recencyBonus+nearBonus+structureBonus+(roleFlip?14:0)-distancePenalty;
+    const score=weightedTouches*14+totalTests*7+recencyBonus+nearBonus+structureBonus+(roleFlip?14:0)-distancePenalty;
 
-    // Keep distant levels only when they are genuinely strong; nearby levels need less historical weight.
-    const minScore=distanceATR<=4?54:distanceATR<=8?68:82;
+    const minScore=distanceATR<=4?52:distanceATR<=8?68:84;
     if(score<minScore) continue;
 
     candidates.push({
-      level,score,touches:spaced.length,weightedTouches,
-      first:spaced[0],last:spaced[spaced.length-1],roleFlip,type,
-      distanceATR,distancePct,age
+      level,score,touches:totalTests,weightedTouches,
+      first:spaced[0]||cluster.points[0],last:spaced[spaced.length-1]||cluster.points[cluster.points.length-1],
+      roleFlip,type,distanceATR,distancePct,age,emerging:false
     });
   }
 
+  // Add one newly formed nearby level even before it has matured into a multi-pivot cluster.
+  const emerging=recentEmergingLevel(pivots,bars,atr,type);
+  if(emerging&&!candidates.some(c=>Math.abs(c.level-emerging.level)<Math.max(a*0.75,current*0.012))){
+    candidates.push(emerging);
+  }
+
   candidates.sort((a,b)=>{
-    // For the primary level, prioritize present-day usefulness first, then strength.
-    const aNear=a.distanceATR<=6, bNear=b.distanceATR<=6;
+    const aNear=a.distanceATR<=6,bNear=b.distanceATR<=6;
     if(aNear!==bNear) return aNear?-1:1;
-    if(Math.abs(a.distanceATR-b.distanceATR)>1.2) return a.distanceATR-b.distanceATR;
+    if(Math.abs(a.distanceATR-b.distanceATR)>1.0) return a.distanceATR-b.distanceATR;
+    if(a.emerging!==b.emerging) return a.emerging?-1:1;
     return b.score-a.score;
   });
 
   const selected=[];
-  for(const c of candidates){
+  for(const cand of candidates){
     if(selected.length>=maxCount) break;
-    // Do not draw two almost identical horizontal levels.
-    if(selected.some(s=>Math.abs(s.level-c.level)<Math.max(a*0.75,current*0.012))) continue;
-    selected.push(c);
+    if(selected.some(s=>Math.abs(s.level-cand.level)<Math.max(a*0.75,current*0.012))) continue;
+    selected.push(cand);
   }
   return selected;
 }
@@ -891,7 +976,7 @@ function autoTrendLines(bars){
       x0:h.first.date,y0:h.level,x1:lastDate,y1:h.level,
       color:idx===0?"#ea580c":"rgba(234,88,12,.58)",dash:idx===0?"dot":"dashdot",
       width:idx===0?2.3:1.5,
-      detail:h.touches+" 次測試；距現價 "+(h.distancePct*100).toFixed(1)+"%"+(h.roleFlip?"；支撐壓力互換":"")
+      detail:(h.emerging?"近期反應位":"")+h.touches+" 次測試；距現價 "+(h.distancePct*100).toFixed(1)+"%"+(h.roleFlip?"；支撐壓力互換":"")
     });
   });
   supports.forEach((h,idx)=>{
@@ -900,7 +985,7 @@ function autoTrendLines(bars){
       x0:h.first.date,y0:h.level,x1:lastDate,y1:h.level,
       color:idx===0?"#111827":"rgba(17,24,39,.55)",dash:idx===0?"dash":"dot",
       width:idx===0?2.3:1.5,
-      detail:h.touches+" 次測試"
+      detail:(h.emerging?"近期反應位；":"")+h.touches+" 次測試"
     });
   });
 
