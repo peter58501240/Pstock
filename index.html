@@ -1325,6 +1325,7 @@ const FIB_RATIOS=[
   {r:0.618,label:"0.618",color:"#ef4444"},
   {r:0.886,label:"0.886",color:"#ca8a04"},
   {r:1,label:"1",color:"#64748b"},
+  {r:1.13,label:"1.13",color:"#64748b"},
   {r:1.272,label:"1.272",color:"#ef4444"},
   {r:1.414,label:"1.414",color:"#ef4444"},
   {r:1.618,label:"1.618",color:"#ef4444"},
@@ -1338,101 +1339,167 @@ function md(date){
 function buildFibCandidates(bars){
   if(!bars?.length) return [];
   const atr=calcATR(bars,14);
-  const major=buildSwings(bars,atr,2.5).filter(p=>!p.forming).map(p=>({...p,strength:"major"}));
-  const minor=buildSwings(bars,atr,1.5).filter(p=>!p.forming).map(p=>({...p,strength:"minor"}));
-  const all=mergePivots([major,minor]);
 
-  const postWaves=(endPivot)=>{
-    const after=all.filter(p=>p.i>endPivot.i+4);
-    const seq=[];
-    for(const p of after){
-      if(!seq.length){
-        seq.push(p);
-        continue;
-      }
-      const prev=seq[seq.length-1];
-      if(p.type===prev.type){
-        // Same-side pivot: keep the more extreme one.
-        const replace=p.type==="H"?p.y>prev.y:p.y<prev.y;
-        if(replace) seq[seq.length-1]=p;
-        continue;
-      }
-      const amp=Math.abs(p.y-prev.y);
-      const a=Math.max(atrAt(atr,p.i,bars),atrAt(atr,prev.i,bars));
-      const pct=amp/Math.max(Math.min(p.y,prev.y),0.01);
-      if(p.i-prev.i>=4 && (amp>=a*1.25 || pct>=0.035)) seq.push(p);
+  const major=buildSwings(bars,atr,2.5)
+    .filter(p=>!p.forming)
+    .map(p=>({...p,strength:"major"}));
+  const minor=buildSwings(bars,atr,1.5)
+    .filter(p=>!p.forming)
+    .map(p=>({...p,strength:"minor"}));
+
+  // Use the more detailed swing sequence to count waves, but promote pivots that
+  // coincide with Major swings. Fibonacci anchors should describe a whole trend,
+  // not merely the latest low-to-high leg.
+  const seq=[];
+  for(const p of minor){
+    const m=major.find(q=>q.type===p.type&&Math.abs(q.i-p.i)<=2);
+    const next=m?{...p,i:m.i,y:m.y,date:m.date,strength:"major"}:p;
+    const prev=seq[seq.length-1];
+    if(prev&&prev.type===next.type){
+      const replace=next.type==="H"?next.y>prev.y:next.y<prev.y;
+      if(replace) seq[seq.length-1]=next;
+    }else{
+      seq.push(next);
     }
-    return seq;
-  };
+  }
 
-  const collect=(source,isFallback=false)=>{
-    const out=[];
-    for(let i=0;i<source.length-1;i++){
-      const a=source[i],b=source[i+1];
-      if(a.type===b.type) continue;
-      const span=b.i-a.i;
-      const amp=Math.abs(b.y-a.y);
-      const ampATR=amp/Math.max(atrAt(atr,b.i,bars),0.01);
-      const ampPct=amp/Math.max(Math.min(a.y,b.y),0.01);
+  const tolerance=(p)=>Math.max(atrAt(atr,p.i,bars)*0.65,p.y*0.012);
+  const raw=[];
 
-      // Fibonacci needs a real impulse leg, not a tiny local zig-zag.
-      if(span<(isFallback?12:16)) continue;
-      if(ampATR<(isFallback?4.2:5.2) && ampPct<(isFallback?0.10:0.13)) continue;
+  for(let sIdx=0;sIdx<seq.length-3;sIdx++){
+    const start=seq[sIdx];
+    const direction=start.type==="L"?"up":"down";
 
-      // Key rule: after the anchor high/low, there must already be at least TWO
-      // meaningful subsequent swing legs. This prevents using very short/recent waves.
-      const follow=postWaves(b);
-      if(follow.length<2) continue;
+    // Need at least L-H-L-H (or H-L-H-L): two completed pushes.
+    for(let eIdx=sIdx+3;eIdx<seq.length;eIdx+=2){
+      const end=seq[eIdx];
+      if(direction==="up"&&end.type!=="H") continue;
+      if(direction==="down"&&end.type!=="L") continue;
 
-      const age=bars.length-1-b.i;
-      const recentEnough=Math.exp(-Math.max(0,age-180)/180);
-      const followBonus=Math.min(36,follow.length*9);
+      const structure=seq.slice(sIdx,eIdx+1);
+      const pushCount=Math.floor(structure.length/2);
+      if(pushCount<2) continue;
+
+      const span=end.i-start.i;
+      if(span<24) continue;
+
+      let valid=true;
+      let structureHits=0;
+      let structureTests=0;
+
+      if(direction==="up"){
+        const lows=structure.filter(p=>p.type==="L");
+        const highs=structure.filter(p=>p.type==="H");
+
+        // 0 must be the structural origin; later pullbacks should not materially
+        // undercut it. 1 must be the terminal high of this completed trend.
+        const minLow=Math.min(...lows.map(p=>p.y));
+        const maxHigh=Math.max(...highs.map(p=>p.y));
+        if(start.y>minLow+tolerance(start)) valid=false;
+        if(end.y<maxHigh-tolerance(end)) valid=false;
+
+        for(let i=1;i<highs.length;i++){
+          structureTests++;
+          if(highs[i].y>=highs[i-1].y-tolerance(highs[i])) structureHits++;
+          else if(highs[i].y<highs[i-1].y-2*tolerance(highs[i])) valid=false;
+        }
+        for(let i=1;i<lows.length;i++){
+          structureTests++;
+          if(lows[i].y>=lows[i-1].y-tolerance(lows[i])) structureHits++;
+          else if(lows[i].y<lows[i-1].y-2*tolerance(lows[i])) valid=false;
+        }
+      }else{
+        const highs=structure.filter(p=>p.type==="H");
+        const lows=structure.filter(p=>p.type==="L");
+
+        const maxHigh=Math.max(...highs.map(p=>p.y));
+        const minLow=Math.min(...lows.map(p=>p.y));
+        if(start.y<maxHigh-tolerance(start)) valid=false;
+        if(end.y>minLow+tolerance(end)) valid=false;
+
+        for(let i=1;i<lows.length;i++){
+          structureTests++;
+          if(lows[i].y<=lows[i-1].y+tolerance(lows[i])) structureHits++;
+          else if(lows[i].y>lows[i-1].y+2*tolerance(lows[i])) valid=false;
+        }
+        for(let i=1;i<highs.length;i++){
+          structureTests++;
+          if(highs[i].y<=highs[i-1].y+tolerance(highs[i])) structureHits++;
+          else if(highs[i].y>highs[i-1].y+2*tolerance(highs[i])) valid=false;
+        }
+      }
+      if(!valid) continue;
+
+      const structureQuality=structureTests?structureHits/structureTests:0;
+      if(structureQuality<0.66) continue;
+
+      const amp=Math.abs(end.y-start.y);
+      const ampATR=amp/Math.max(atrAt(atr,end.i,bars),0.01);
+      const ampPct=amp/Math.max(Math.min(start.y,end.y),0.01);
+      if(ampATR<6.0&&ampPct<0.14) continue;
+
+      // The terminal 1-point must already be confirmed by a meaningful opposite
+      // swing. Otherwise the trend is still extending and 1 should keep moving.
+      const confirm=seq[eIdx+1];
+      if(!confirm||confirm.type===end.type) continue;
+      const retrace=Math.abs(confirm.y-end.y);
+      const retraceATR=retrace/Math.max(atrAt(atr,confirm.i,bars),0.01);
+      const retracePct=retrace/Math.max(end.y,0.01);
+      if(retraceATR<1.4&&retracePct<0.045) continue;
+
+      // Reward a true trend origin: for an uptrend a preceding low should not be
+      // materially lower than start; inverse for downtrend.
+      let originBonus=0;
+      const priorSame=[...seq.slice(0,sIdx)].reverse().find(p=>p.type===start.type);
+      if(!priorSame){
+        originBonus=12;
+      }else if(direction==="up"){
+        if(start.y<=priorSame.y+tolerance(start)) originBonus=18;
+      }else{
+        if(start.y>=priorSame.y-tolerance(start)) originBonus=18;
+      }
+
+      const endpointMajor=(start.strength==="major"?1:0)+(end.strength==="major"?1:0);
+      const age=bars.length-1-end.i;
       const score=
-        ampATR*8+
-        Math.min(34,span*0.35)+
-        ampPct*70+
-        followBonus+
-        (a.strength==="major"?24:8)+
-        recentEnough*12;
+        pushCount*42+
+        structureQuality*40+
+        Math.min(55,ampPct*105)+
+        Math.min(34,span*0.30)+
+        endpointMajor*15+
+        Math.min(24,retraceATR*7)+
+        originBonus+
+        24*Math.exp(-age/150);
 
-      out.push({
-        p1:a,p2:b,start:a.y,end:b.y,span,amp,ampATR,ampPct,
-        direction:b.y>a.y?"up":"down",
-        score,strength:a.strength,
-        followWaves:follow.length,
-        followPivots:follow
+      raw.push({
+        p1:start,p2:end,start:start.y,end:end.y,span,amp,ampATR,ampPct,
+        direction,score,strength:endpointMajor===2?"major":"mixed",
+        waveCount:pushCount,structureQuality,
+        confirmPivot:confirm,retraceATR,retracePct
       });
     }
-    return out;
-  };
-
-  // Prefer major swings. Only use minor swings as fallback when major structure is insufficient.
-  let raw=collect(major,false);
-  if(raw.length<2) raw=[...raw,...collect(minor,true)];
+  }
 
   raw.sort((a,b)=>b.score-a.score);
 
   const chosen=[];
   for(const cand of raw){
     if(chosen.some(x=>
-      Math.abs(x.p1.i-cand.p1.i)<=5 &&
-      Math.abs(x.p2.i-cand.p2.i)<=5
+      Math.abs(x.p1.i-cand.p1.i)<=5&&Math.abs(x.p2.i-cand.p2.i)<=5
     )) continue;
 
-    // Avoid offering several almost identical ranges.
+    // Only keep a second option when it is genuinely a different scale/structure.
     if(chosen.some(x=>{
-      const s1=Math.min(x.start,x.end),e1=Math.max(x.start,x.end);
-      const s2=Math.min(cand.start,cand.end),e2=Math.max(cand.start,cand.end);
-      const overlap=Math.max(0,Math.min(e1,e2)-Math.max(s1,s2));
-      const base=Math.max(1,Math.min(e1-s1,e2-s2));
-      return overlap/base>0.86 && Math.abs(x.p2.i-cand.p2.i)<25;
+      const sameEnd=Math.abs(x.p2.i-cand.p2.i)<=10;
+      const spanRatio=Math.min(x.span,cand.span)/Math.max(x.span,cand.span);
+      const startNear=Math.abs(x.p1.i-cand.p1.i)<=15;
+      return (sameEnd&&spanRatio>0.78)||(startNear&&spanRatio>0.86);
     })) continue;
 
     chosen.push(cand);
-    if(chosen.length>=3) break;
+    if(chosen.length>=2) break;
   }
 
-  // Present the best structural swing first, then alternatives.
   return chosen.map((x,i)=>({...x,index:i}));
 }
 function fibValue(cand,ratio){
@@ -1548,9 +1615,10 @@ function bindFibPinch(){
   chart.addEventListener("touchend",e=>{if(e.touches.length<2) fibPinchState=null;},{passive:true});
 }
 function fibWaveLabel(cand,i){
-  const prefix=i===0?"主波段":"備選波段 "+(i+1);
+  const prefix=i===0?"主費波":"次級費波";
   const arrow=cand.direction==="up"?"↑":"↓";
-  return prefix+arrow+" "+md(cand.p1.date)+" "+cand.start.toFixed(2)+" → "+md(cand.p2.date)+" "+cand.end.toFixed(2)+"｜後續 "+cand.followWaves+" 波";
+  return prefix+arrow+" "+md(cand.p1.date)+" "+cand.start.toFixed(2)+
+    " → "+md(cand.p2.date)+" "+cand.end.toFixed(2)+"｜"+cand.waveCount+" 段推進";
 }
 function populateFibWaves(){
   $("fibWave").innerHTML=fibCandidates.map((c,i)=>'<option value="'+i+'">'+fibWaveLabel(c,i)+'</option>').join("");
@@ -1695,9 +1763,10 @@ function renderFib(){
     else zoneText=lo+" ～ "+hi;
   }
   $("fibStatus").textContent=
-    info.name+" "+code+"｜"+(cand.direction==="up"?"上升波段":"下降波段")+" "+
+    info.name+" "+code+"｜"+(cand.direction==="up"?"上升主趨勢":"下降主趨勢")+" "+
     md(cand.p1.date)+" "+cand.start.toFixed(2)+" → "+md(cand.p2.date)+" "+cand.end.toFixed(2)+
-    "｜錨點後已有 "+cand.followWaves+" 個有效波段｜現價 "+current.toFixed(2)+"｜所在費波區間 "+zoneText;
+    "｜0→1 內含 "+cand.waveCount+" 段推進｜1 已由後續反向波確認｜現價 "+current.toFixed(2)+
+    "｜所在費波區間 "+zoneText;
 }
 function switchFibWave(delta){
   if(!fibCandidates.length) return;
