@@ -146,6 +146,9 @@
         <select id="fibWave" class="fib-wave-select"></select>
         <button id="fibPrevBtn" class="btn">◀ 上一組</button>
         <button id="fibNextBtn" class="btn">下一組 ▶</button>
+        <button id="fibSet0Btn" class="btn">◎ 調整 0</button>
+        <button id="fibSet1Btn" class="btn">◎ 調整 1</button>
+        <button id="fibAutoBtn" class="btn">↺ 自動錨點</button>
         <button id="fibPanBtn" class="btn">✋ 拖曳</button>
         <button id="fibZoomInBtn" class="btn">＋ 放大</button>
         <button id="fibZoomOutBtn" class="btn">－ 縮小</button>
@@ -1316,6 +1319,12 @@ let fibAutoScaling=false;
 let fibBars=[];
 let fibCandidates=[];
 let fibPinchState=null;
+let fibAnchorEdit=null;
+let fibManualByTicker={};
+try{fibManualByTicker=JSON.parse(localStorage.getItem("pstockFibManualAnchors")||"{}")||{};}catch(e){fibManualByTicker={};}
+function saveFibManual(){
+  try{localStorage.setItem("pstockFibManualAnchors",JSON.stringify(fibManualByTicker));}catch(e){}
+}
 
 const FIB_RATIOS=[
   {r:0,label:"0",color:"#94a3b8"},
@@ -1336,20 +1345,60 @@ function md(date){
   const s=String(date).slice(5).replace(/^0/,"").replace("-","/").replace("/0","/");
   return s;
 }
+function evaluateFibLifecycle(cand,bars,seq,atr){
+  const d=cand.end-cand.start;
+  if(!Number.isFinite(d)||Math.abs(d)<1e-9) return {status:"invalid",reason:"zero-range"};
+  const zeroTolBase=Math.max(Math.abs(d)*0.025,cand.start*0.012);
+  const afterBars=bars.slice(cand.p2.i+1);
+  if(!afterBars.length) return {status:"forming",reason:"no-after-bars"};
+
+  // Once the origin 0 is clearly broken on a closing basis, the old Fibonacci is invalid.
+  let zeroBroken=false;
+  for(let k=cand.p2.i+1;k<bars.length;k++){
+    const b=bars[k],a=atrAt(atr,k,bars);
+    const tol=Math.max(zeroTolBase,a*0.75);
+    const close=Number(b.close);
+    if(cand.direction==="up"&&close<cand.start-tol){zeroBroken=true;break;}
+    if(cand.direction==="down"&&close>cand.start+tol){zeroBroken=true;break;}
+  }
+  if(zeroBroken) return {status:"invalid",reason:"zero-broken"};
+
+  // Measure how far the old wave has already extended in its original direction.
+  let extremeRatio=-Infinity,extremeI=cand.p2.i;
+  for(let k=cand.p2.i+1;k<bars.length;k++){
+    const px=cand.direction==="up"?Number(bars[k].high):Number(bars[k].low);
+    const ratio=(px-cand.start)/d;
+    if(ratio>extremeRatio){extremeRatio=ratio;extremeI=k;}
+  }
+
+  // If price has already run through a large extension and then produced a meaningful
+  // opposite swing, the old 0→1 has finished its job and a newer structural wave should take over.
+  if(extremeRatio>=1.618){
+    const oppositeType=cand.direction==="up"?"L":"H";
+    const laterOpp=seq.find(p=>p.i>extremeI+3&&p.type===oppositeType);
+    if(laterOpp){
+      const extPx=cand.start+d*extremeRatio;
+      const pullback=Math.abs(laterOpp.y-extPx);
+      const pullATR=pullback/Math.max(atrAt(atr,laterOpp.i,bars),0.01);
+      const pullPct=pullback/Math.max(Math.abs(extPx),0.01);
+      if(extremeRatio>=2 || pullATR>=1.6 || pullPct>=0.055){
+        return {status:"retired",reason:"new-regime",extremeRatio};
+      }
+    }
+  }
+
+  const current=Number(bars[bars.length-1].close);
+  const currentRatio=(current-cand.start)/d;
+  const status=currentRatio>1?"extension":"retracement";
+  return {status,reason:"active",currentRatio,extremeRatio};
+}
 function buildFibCandidates(bars){
   if(!bars?.length) return [];
   const atr=calcATR(bars,14);
+  const major=buildSwings(bars,atr,2.5).filter(p=>!p.forming).map(p=>({...p,strength:"major"}));
+  const minor=buildSwings(bars,atr,1.5).filter(p=>!p.forming).map(p=>({...p,strength:"minor"}));
 
-  const major=buildSwings(bars,atr,2.5)
-    .filter(p=>!p.forming)
-    .map(p=>({...p,strength:"major"}));
-  const minor=buildSwings(bars,atr,1.5)
-    .filter(p=>!p.forming)
-    .map(p=>({...p,strength:"minor"}));
-
-  // Use the more detailed swing sequence to count waves, but promote pivots that
-  // coincide with Major swings. Fibonacci anchors should describe a whole trend,
-  // not merely the latest low-to-high leg.
+  // Detailed alternating structure. Major turns upgrade nearby Minor pivots.
   const seq=[];
   for(const p of minor){
     const m=major.find(q=>q.type===p.type&&Math.abs(q.i-p.i)<=2);
@@ -1358,19 +1407,16 @@ function buildFibCandidates(bars){
     if(prev&&prev.type===next.type){
       const replace=next.type==="H"?next.y>prev.y:next.y<prev.y;
       if(replace) seq[seq.length-1]=next;
-    }else{
-      seq.push(next);
-    }
+    }else seq.push(next);
   }
 
-  const tolerance=(p)=>Math.max(atrAt(atr,p.i,bars)*0.65,p.y*0.012);
+  const tolerance=p=>Math.max(atrAt(atr,p.i,bars)*0.65,p.y*0.012);
   const raw=[];
 
   for(let sIdx=0;sIdx<seq.length-3;sIdx++){
     const start=seq[sIdx];
     const direction=start.type==="L"?"up":"down";
 
-    // Need at least L-H-L-H (or H-L-H-L): two completed pushes.
     for(let eIdx=sIdx+3;eIdx<seq.length;eIdx+=2){
       const end=seq[eIdx];
       if(direction==="up"&&end.type!=="H") continue;
@@ -1379,58 +1425,26 @@ function buildFibCandidates(bars){
       const structure=seq.slice(sIdx,eIdx+1);
       const pushCount=Math.floor(structure.length/2);
       if(pushCount<2) continue;
-
       const span=end.i-start.i;
       if(span<24) continue;
 
-      let valid=true;
-      let structureHits=0;
-      let structureTests=0;
-
+      let valid=true,hits=0,tests=0;
       if(direction==="up"){
-        const lows=structure.filter(p=>p.type==="L");
-        const highs=structure.filter(p=>p.type==="H");
-
-        // 0 must be the structural origin; later pullbacks should not materially
-        // undercut it. 1 must be the terminal high of this completed trend.
-        const minLow=Math.min(...lows.map(p=>p.y));
-        const maxHigh=Math.max(...highs.map(p=>p.y));
-        if(start.y>minLow+tolerance(start)) valid=false;
-        if(end.y<maxHigh-tolerance(end)) valid=false;
-
-        for(let i=1;i<highs.length;i++){
-          structureTests++;
-          if(highs[i].y>=highs[i-1].y-tolerance(highs[i])) structureHits++;
-          else if(highs[i].y<highs[i-1].y-2*tolerance(highs[i])) valid=false;
-        }
-        for(let i=1;i<lows.length;i++){
-          structureTests++;
-          if(lows[i].y>=lows[i-1].y-tolerance(lows[i])) structureHits++;
-          else if(lows[i].y<lows[i-1].y-2*tolerance(lows[i])) valid=false;
-        }
+        const lows=structure.filter(p=>p.type==="L"),highs=structure.filter(p=>p.type==="H");
+        if(start.y>Math.min(...lows.map(p=>p.y))+tolerance(start)) valid=false;
+        if(end.y<Math.max(...highs.map(p=>p.y))-tolerance(end)) valid=false;
+        for(let i=1;i<highs.length;i++){tests++;if(highs[i].y>=highs[i-1].y-tolerance(highs[i]))hits++;else if(highs[i].y<highs[i-1].y-2*tolerance(highs[i]))valid=false;}
+        for(let i=1;i<lows.length;i++){tests++;if(lows[i].y>=lows[i-1].y-tolerance(lows[i]))hits++;else if(lows[i].y<lows[i-1].y-2*tolerance(lows[i]))valid=false;}
       }else{
-        const highs=structure.filter(p=>p.type==="H");
-        const lows=structure.filter(p=>p.type==="L");
-
-        const maxHigh=Math.max(...highs.map(p=>p.y));
-        const minLow=Math.min(...lows.map(p=>p.y));
-        if(start.y<maxHigh-tolerance(start)) valid=false;
-        if(end.y>minLow+tolerance(end)) valid=false;
-
-        for(let i=1;i<lows.length;i++){
-          structureTests++;
-          if(lows[i].y<=lows[i-1].y+tolerance(lows[i])) structureHits++;
-          else if(lows[i].y>lows[i-1].y+2*tolerance(lows[i])) valid=false;
-        }
-        for(let i=1;i<highs.length;i++){
-          structureTests++;
-          if(highs[i].y<=highs[i-1].y+tolerance(highs[i])) structureHits++;
-          else if(highs[i].y>highs[i-1].y+2*tolerance(highs[i])) valid=false;
-        }
+        const highs=structure.filter(p=>p.type==="H"),lows=structure.filter(p=>p.type==="L");
+        if(start.y<Math.max(...highs.map(p=>p.y))-tolerance(start)) valid=false;
+        if(end.y>Math.min(...lows.map(p=>p.y))+tolerance(end)) valid=false;
+        for(let i=1;i<lows.length;i++){tests++;if(lows[i].y<=lows[i-1].y+tolerance(lows[i]))hits++;else if(lows[i].y>lows[i-1].y+2*tolerance(lows[i]))valid=false;}
+        for(let i=1;i<highs.length;i++){tests++;if(highs[i].y<=highs[i-1].y+tolerance(highs[i]))hits++;else if(highs[i].y>highs[i-1].y+2*tolerance(highs[i]))valid=false;}
       }
       if(!valid) continue;
 
-      const structureQuality=structureTests?structureHits/structureTests:0;
+      const structureQuality=tests?hits/tests:0;
       if(structureQuality<0.66) continue;
 
       const amp=Math.abs(end.y-start.y);
@@ -1438,45 +1452,35 @@ function buildFibCandidates(bars){
       const ampPct=amp/Math.max(Math.min(start.y,end.y),0.01);
       if(ampATR<6.0&&ampPct<0.14) continue;
 
-      // The terminal 1-point must already be confirmed by a meaningful opposite
-      // swing. Otherwise the trend is still extending and 1 should keep moving.
+      // 1 must be completed by a real opposite swing.
       const confirm=seq[eIdx+1];
       if(!confirm||confirm.type===end.type) continue;
       const retrace=Math.abs(confirm.y-end.y);
       const retraceATR=retrace/Math.max(atrAt(atr,confirm.i,bars),0.01);
-      const retracePct=retrace/Math.max(end.y,0.01);
+      const retracePct=retrace/Math.max(Math.abs(end.y),0.01);
       if(retraceATR<1.4&&retracePct<0.045) continue;
-
-      // Reward a true trend origin: for an uptrend a preceding low should not be
-      // materially lower than start; inverse for downtrend.
-      let originBonus=0;
-      const priorSame=[...seq.slice(0,sIdx)].reverse().find(p=>p.type===start.type);
-      if(!priorSame){
-        originBonus=12;
-      }else if(direction==="up"){
-        if(start.y<=priorSame.y+tolerance(start)) originBonus=18;
-      }else{
-        if(start.y>=priorSame.y-tolerance(start)) originBonus=18;
-      }
 
       const endpointMajor=(start.strength==="major"?1:0)+(end.strength==="major"?1:0);
       const age=bars.length-1-end.i;
-      const score=
-        pushCount*42+
-        structureQuality*40+
-        Math.min(55,ampPct*105)+
-        Math.min(34,span*0.30)+
-        endpointMajor*15+
-        Math.min(24,retraceATR*7)+
-        originBonus+
-        24*Math.exp(-age/150);
-
-      raw.push({
+      const base={
         p1:start,p2:end,start:start.y,end:end.y,span,amp,ampATR,ampPct,
-        direction,score,strength:endpointMajor===2?"major":"mixed",
-        waveCount:pushCount,structureQuality,
-        confirmPivot:confirm,retraceATR,retracePct
-      });
+        direction,strength:endpointMajor===2?"major":"mixed",
+        waveCount:pushCount,structureQuality,confirmPivot:confirm,retraceATR,retracePct
+      };
+      const life=evaluateFibLifecycle(base,bars,seq,atr);
+
+      // Main auto Fibonacci must be alive NOW. Old waves that lost 0 or already completed
+      // a large extension/regime are excluded rather than being rewarded for historical beauty.
+      if(life.status==="invalid"||life.status==="retired"||life.status==="forming") continue;
+
+      const lifecycleBonus=life.status==="retracement"?34:18;
+      const score=
+        pushCount*40+structureQuality*40+
+        Math.min(55,ampPct*105)+Math.min(34,span*0.30)+
+        endpointMajor*15+Math.min(24,retraceATR*7)+
+        lifecycleBonus+28*Math.exp(-age/120);
+
+      raw.push({...base,...life,score});
     }
   }
 
@@ -1484,23 +1488,99 @@ function buildFibCandidates(bars){
 
   const chosen=[];
   for(const cand of raw){
-    if(chosen.some(x=>
-      Math.abs(x.p1.i-cand.p1.i)<=5&&Math.abs(x.p2.i-cand.p2.i)<=5
-    )) continue;
-
-    // Only keep a second option when it is genuinely a different scale/structure.
+    if(chosen.some(x=>Math.abs(x.p1.i-cand.p1.i)<=5&&Math.abs(x.p2.i-cand.p2.i)<=5)) continue;
     if(chosen.some(x=>{
       const sameEnd=Math.abs(x.p2.i-cand.p2.i)<=10;
       const spanRatio=Math.min(x.span,cand.span)/Math.max(x.span,cand.span);
       const startNear=Math.abs(x.p1.i-cand.p1.i)<=15;
       return (sameEnd&&spanRatio>0.78)||(startNear&&spanRatio>0.86);
     })) continue;
-
     chosen.push(cand);
     if(chosen.length>=2) break;
   }
-
   return chosen.map((x,i)=>({...x,index:i}));
+}
+function manualFibCandidate(code){
+  const m=fibManualByTicker[code];
+  if(!m||!fibBars.length) return null;
+  const i0=Math.max(0,Math.min(fibBars.length-1,Number(m.i0)));
+  const i1=Math.max(0,Math.min(fibBars.length-1,Number(m.i1)));
+  if(!Number.isFinite(i0)||!Number.isFinite(i1)||i0===i1) return null;
+  const p0={i:i0,date:fibBars[i0].date,y:Number(m.y0),type:Number(m.y1)>Number(m.y0)?"L":"H",strength:"manual"};
+  const p1={i:i1,date:fibBars[i1].date,y:Number(m.y1),type:Number(m.y1)>Number(m.y0)?"H":"L",strength:"manual"};
+  return {
+    p1:p0,p2:p1,start:p0.y,end:p1.y,
+    direction:p1.y>p0.y?"up":"down",
+    span:Math.abs(i1-i0),waveCount:m.waveCount||0,
+    manual:true,score:999999,status:"manual"
+  };
+}
+function selectedFibCandidate(){
+  const code=$("fibTicker")?.value;
+  if($("fibWave")?.value==="manual") return manualFibCandidate(code);
+  const idx=Math.max(0,Math.min(fibCandidates.length-1,Number($("fibWave")?.value)||0));
+  return fibCandidates[idx]||null;
+}
+function ensureManualFib(){
+  const code=$("fibTicker").value;
+  let m=fibManualByTicker[code];
+  if(m) return m;
+  const base=selectedFibCandidate();
+  if(!base) return null;
+  m={i0:base.p1.i,i1:base.p2.i,y0:base.start,y1:base.end,waveCount:base.waveCount||0};
+  fibManualByTicker[code]=m;
+  saveFibManual();
+  populateFibWaves("manual");
+  return m;
+}
+function setFibAnchorEdit(which){
+  const m=ensureManualFib();
+  if(!m) return;
+  fibAnchorEdit=which;
+  $("fibSet0Btn").classList.toggle("active",which===0);
+  $("fibSet1Btn").classList.toggle("active",which===1);
+  $("fibStatus").textContent="調整錨點 "+which+"：請直接點選 K 棒，系統會吸附到該根的"+(which===0?"起點極值":"終點極值")+"。";
+  Plotly.relayout("fibChart",{dragmode:false});
+}
+function stopFibAnchorEdit(){
+  fibAnchorEdit=null;
+  $("fibSet0Btn")?.classList.remove("active");
+  $("fibSet1Btn")?.classList.remove("active");
+  if(fibInitialized) Plotly.relayout("fibChart",{dragmode:"pan"});
+}
+function resetFibManual(){
+  const code=$("fibTicker").value;
+  delete fibManualByTicker[code];
+  saveFibManual();
+  stopFibAnchorEdit();
+  populateFibWaves("0");
+  renderFib();
+}
+function applyFibAnchorFromDate(date){
+  if(fibAnchorEdit===null||!fibBars.length) return;
+  const target=dateMs(String(date).slice(0,10)+"T00:00:00");
+  let idx=0,best=Infinity;
+  fibBars.forEach((b,i)=>{
+    const t=dateMs(b.date+"T00:00:00"),d=Math.abs(t-target);
+    if(d<best){best=d;idx=i;}
+  });
+  const code=$("fibTicker").value;
+  const m=ensureManualFib();
+  if(!m) return;
+  const direction=Number(m.y1)>Number(m.y0)?"up":"down";
+  if(fibAnchorEdit===0){
+    m.i0=idx;
+    m.y0=direction==="up"?Number(fibBars[idx].low):Number(fibBars[idx].high);
+  }else{
+    m.i1=idx;
+    m.y1=direction==="up"?Number(fibBars[idx].high):Number(fibBars[idx].low);
+  }
+  // If the user crosses the two endpoints, infer the new direction from prices.
+  fibManualByTicker[code]=m;
+  saveFibManual();
+  stopFibAnchorEdit();
+  populateFibWaves("manual");
+  renderFib();
 }
 function fibValue(cand,ratio){
   return cand.start+(cand.end-cand.start)*ratio;
@@ -1620,9 +1700,15 @@ function fibWaveLabel(cand,i){
   return prefix+arrow+" "+md(cand.p1.date)+" "+cand.start.toFixed(2)+
     " → "+md(cand.p2.date)+" "+cand.end.toFixed(2)+"｜"+cand.waveCount+" 段推進";
 }
-function populateFibWaves(){
-  $("fibWave").innerHTML=fibCandidates.map((c,i)=>'<option value="'+i+'">'+fibWaveLabel(c,i)+'</option>').join("");
-  $("fibWave").value="0";
+function populateFibWaves(prefer){
+  const code=$("fibTicker")?.value;
+  const manual=manualFibCandidate(code);
+  let html=manual?'<option value="manual">手動錨點 '+md(manual.p1.date)+' '+manual.start.toFixed(2)+' → '+md(manual.p2.date)+' '+manual.end.toFixed(2)+'</option>':"";
+  html+=fibCandidates.map((c,i)=>'<option value="'+i+'">'+fibWaveLabel(c,i)+'</option>').join("");
+  $("fibWave").innerHTML=html;
+  if(prefer==="manual"&&manual) $("fibWave").value="manual";
+  else if(prefer!==undefined&&[...$("fibWave").options].some(o=>o.value===String(prefer))) $("fibWave").value=String(prefer);
+  else $("fibWave").value=manual?"manual":"0";
 }
 function renderFib(){
   if(!historyPayload) return;
@@ -1634,8 +1720,9 @@ function renderFib(){
   }
   fibBars=info.bars;
   if(!fibCandidates.length) fibCandidates=buildFibCandidates(fibBars);
-  const idx=Math.max(0,Math.min(fibCandidates.length-1,Number($("fibWave").value)||0));
-  const cand=fibCandidates[idx];
+  const waveValue=$("fibWave").value;
+  const idx=waveValue==="manual"?-1:Math.max(0,Math.min(fibCandidates.length-1,Number(waveValue)||0));
+  const cand=selectedFibCandidate();
   if(!cand){
     $("fibStatus").textContent=info.name+" "+code+"｜找不到足夠明確的波段高低點";
     return;
@@ -1724,7 +1811,7 @@ function renderFib(){
       domain:[0,0.20],side:"right",showgrid:true,gridcolor:"#f3f4f6",fixedrange:false,
       automargin:!isMobile,ticklabelposition:isMobile?"inside":"outside",ticks:"",ticklen:0
     },
-    shapes,annotations,uirevision:code+"-"+idx
+    shapes,annotations,uirevision:code+"-"+waveValue
   };
   const config={
     responsive:true,displaylogo:false,displayModeBar:!isMobile,scrollZoom:true,editable:false,
@@ -1742,6 +1829,11 @@ function renderFib(){
         if(keys.some(k=>k.startsWith("xaxis.range")||k==="xaxis.autorange")){
           updateFibDateTicks(); scheduleFibAutoscale();
         }
+      });
+      chart.on("plotly_click",ev=>{
+        if(fibAnchorEdit===null) return;
+        const pt=ev?.points?.[0];
+        if(pt?.x!==undefined) applyFibAnchorFromDate(pt.x);
       });
       fibListenerBound=true;
     }
@@ -1763,16 +1855,17 @@ function renderFib(){
     else zoneText=lo+" ～ "+hi;
   }
   $("fibStatus").textContent=
-    info.name+" "+code+"｜"+(cand.direction==="up"?"上升主趨勢":"下降主趨勢")+" "+
+    info.name+" "+code+"｜"+(cand.manual?"手動錨點｜":"")+(cand.direction==="up"?"上升主趨勢":"下降主趨勢")+" "+
     md(cand.p1.date)+" "+cand.start.toFixed(2)+" → "+md(cand.p2.date)+" "+cand.end.toFixed(2)+
-    "｜0→1 內含 "+cand.waveCount+" 段推進｜1 已由後續反向波確認｜現價 "+current.toFixed(2)+
-    "｜所在費波區間 "+zoneText;
+    (cand.manual?"":"｜0→1 內含 "+cand.waveCount+" 段推進｜目前狀態 "+(cand.status==="extension"?"延伸中":"有效回撤中"))+
+    "｜現價 "+current.toFixed(2)+"｜所在費波區間 "+zoneText;
 }
 function switchFibWave(delta){
   if(!fibCandidates.length) return;
-  let i=Number($("fibWave").value)||0;
+  let i=$("fibWave").value==="manual"?0:(Number($("fibWave").value)||0);
   i=(i+delta+fibCandidates.length)%fibCandidates.length;
   $("fibWave").value=String(i);
+  stopFibAnchorEdit();
   renderFib();
 }
 async function toggleFibFullscreen(){
@@ -1812,13 +1905,17 @@ async function initFibTab(){
         const info=historyPayload?.tickers?.[code];
         fibBars=info?.bars||[];
         fibCandidates=buildFibCandidates(fibBars);
-        populateFibWaves();
+        populateFibWaves(fibManualByTicker[code]?"manual":"0");
+        stopFibAnchorEdit();
         renderFib();
       };
-      $("fibWave").onchange=()=>renderFib();
+      $("fibWave").onchange=()=>{stopFibAnchorEdit();renderFib();};
       $("fibPrevBtn").onclick=()=>switchFibWave(-1);
       $("fibNextBtn").onclick=()=>switchFibWave(1);
-      $("fibPanBtn").onclick=()=>Plotly.relayout("fibChart",{dragmode:"pan"});
+      $("fibSet0Btn").onclick=()=>setFibAnchorEdit(0);
+      $("fibSet1Btn").onclick=()=>setFibAnchorEdit(1);
+      $("fibAutoBtn").onclick=()=>resetFibManual();
+      $("fibPanBtn").onclick=()=>{stopFibAnchorEdit();Plotly.relayout("fibChart",{dragmode:"pan"});};
       $("fibZoomInBtn").onclick=()=>zoomFib(0.72);
       $("fibZoomOutBtn").onclick=()=>zoomFib(1.38);
       $("fibResetBtn").onclick=()=>resetFibZoom();
@@ -1829,7 +1926,7 @@ async function initFibTab(){
     const info=historyPayload?.tickers?.[$("fibTicker").value];
     fibBars=info?.bars||[];
     fibCandidates=buildFibCandidates(fibBars);
-    populateFibWaves();
+    populateFibWaves(fibManualByTicker[$("fibTicker").value]?"manual":"0");
     renderFib();
   }catch(e){
     $("fibStatus").textContent="費波資料讀取失敗："+e.message;
