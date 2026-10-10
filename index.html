@@ -29,7 +29,8 @@
 .btn{border:1px solid var(--line);background:#fff;border-radius:10px;padding:8px 11px;font-size:12px;font-weight:800;cursor:pointer}.footer{text-align:center;color:#9ca3af;font-size:11px;margin-top:20px}
 .summarybar{display:grid;grid-template-columns:repeat(3,1fr);gap:9px;margin-top:10px}.mini{border-radius:13px;padding:12px;background:#fff;border:1px solid #edf0f4}.mini .k{font-size:11px;color:#6b7280}.mini .v{font-size:18px;font-weight:900;margin-top:4px}
 .trend-toolbar{display:flex;gap:8px;flex-wrap:wrap;align-items:center;padding:12px 14px;border-bottom:1px solid var(--line)}
-.trend-toolbar select{border:1px solid var(--line);border-radius:10px;padding:8px 10px;background:#fff;font-weight:800}
+.trend-toolbar select,.trend-toolbar input{border:1px solid var(--line);border-radius:10px;padding:8px 10px;background:#fff;font-weight:800}
+.trend-toolbar input.stock-code-input{width:118px;min-width:100px}
 .trend-toolbar .btn.active{background:#111827;color:#fff;border-color:#111827}
 .trend-chart{height:780px;min-height:600px;touch-action:none;overscroll-behavior:contain;position:relative;width:100%}
 .trend-cursor-price{position:absolute;z-index:20;display:none;transform:translateY(-50%);padding:3px 6px;border-radius:4px;background:#111827;color:#fff;font-size:11px;font-weight:800;line-height:1.2;pointer-events:none;white-space:nowrap;box-shadow:0 1px 3px rgba(0,0,0,.18)}
@@ -128,6 +129,8 @@
     <div id="trendPanel" class="card table-card">
       <div class="trend-toolbar">
         <select id="trendTicker"></select>
+        <input id="trendCodeInput" class="stock-code-input" inputmode="numeric" maxlength="6" placeholder="輸入股票代號">
+        <button id="trendLoadCodeBtn" class="btn">查詢</button>
         <button id="panBtn" class="btn">✋ 拖曳</button>
         <button id="zoomInBtn" class="btn">＋ 放大</button>
         <button id="zoomOutBtn" class="btn">－ 縮小</button>
@@ -143,6 +146,8 @@
     <div id="fibPanel" class="card table-card">
       <div class="trend-toolbar">
         <select id="fibTicker"></select>
+        <input id="fibCodeInput" class="stock-code-input" inputmode="numeric" maxlength="6" placeholder="輸入股票代號">
+        <button id="fibLoadCodeBtn" class="btn">查詢</button>
         <select id="fibWave" class="fib-wave-select"></select>
         <button id="fibPrevBtn" class="btn">◀ 上一組</button>
         <button id="fibNextBtn" class="btn">下一組 ▶</button>
@@ -1098,6 +1103,157 @@ async function loadHistory(){
   historyPayload=await r.json();
   return historyPayload;
 }
+
+let finMindStockInfoCache=null;
+function isoDateDaysAgo(days){
+  const d=new Date();
+  d.setDate(d.getDate()-days);
+  return d.toISOString().slice(0,10);
+}
+function validateTaiwanStockCode(raw){
+  const code=String(raw||"").trim();
+  if(!/^\d{4,6}$/.test(code)) throw new Error("請輸入 4～6 碼台股代號");
+  return code;
+}
+async function fetchJsonTimeout(url,timeoutMs=15000){
+  const ctl=new AbortController();
+  const timer=setTimeout(()=>ctl.abort(),timeoutMs);
+  try{
+    const r=await fetch(url,{cache:"no-store",signal:ctl.signal});
+    if(!r.ok) throw new Error("HTTP "+r.status);
+    return await r.json();
+  }finally{clearTimeout(timer);}
+}
+async function fetchFinMindHistory(code){
+  const qs=new URLSearchParams({
+    dataset:"TaiwanStockPrice",
+    data_id:code,
+    start_date:isoDateDaysAgo(820),
+    end_date:new Date().toISOString().slice(0,10)
+  });
+  const data=await fetchJsonTimeout("https://api.finmindtrade.com/api/v4/data?"+qs.toString(),18000);
+  if(Number(data?.status)!==200||!Array.isArray(data?.data)||data.data.length<60){
+    throw new Error(data?.msg||"FinMind 無足夠歷史資料");
+  }
+  const bars=data.data.map(r=>({
+    date:String(r.date).slice(0,10),
+    open:Number(r.open),high:Number(r.max),low:Number(r.min),close:Number(r.close),
+    volume:Number(r.Trading_Volume)||0
+  })).filter(b=>b.date&&[b.open,b.high,b.low,b.close].every(Number.isFinite))
+    .sort((a,b)=>a.date.localeCompare(b.date));
+  if(bars.length<60) throw new Error("FinMind 歷史資料不足");
+  return bars;
+}
+async function fetchYahooHistoryViaBrowser(code){
+  const now=Math.floor(Date.now()/1000);
+  const start=now-820*86400;
+  const proxies=[
+    url=>url,
+    url=>"https://corsproxy.io/?"+encodeURIComponent(url),
+    url=>"https://api.allorigins.win/raw?url="+encodeURIComponent(url)
+  ];
+  let lastErr=null;
+  for(const suffix of ["TW","TWO"]){
+    const base="https://query1.finance.yahoo.com/v8/finance/chart/"+code+"."+suffix+
+      "?period1="+start+"&period2="+(now+86400)+"&interval=1d&events=history&includeAdjustedClose=false";
+    for(const prox of proxies){
+      try{
+        const data=await fetchJsonTimeout(prox(base),16000);
+        const r=data?.chart?.result?.[0];
+        if(!r) throw new Error("Yahoo 無資料");
+        const ts=r.timestamp||[],q=r.indicators?.quote?.[0]||{};
+        const bars=[];
+        ts.forEach((t,i)=>{
+          const o=Number(q.open?.[i]),h=Number(q.high?.[i]),l=Number(q.low?.[i]),cl=Number(q.close?.[i]);
+          if(![o,h,l,cl].every(Number.isFinite)) return;
+          bars.push({
+            date:new Date(Number(t)*1000).toISOString().slice(0,10),
+            open:o,high:h,low:l,close:cl,volume:Number(q.volume?.[i])||0
+          });
+        });
+        if(bars.length>=60) return {bars,market:suffix==="TW"?"上市":"上櫃"};
+        throw new Error("Yahoo 歷史資料不足");
+      }catch(e){lastErr=e;}
+    }
+  }
+  throw lastErr||new Error("Yahoo 查詢失敗");
+}
+async function lookupFinMindStockName(code){
+  try{
+    if(!finMindStockInfoCache){
+      const qs=new URLSearchParams({dataset:"TaiwanStockInfo"});
+      const d=await fetchJsonTimeout("https://api.finmindtrade.com/api/v4/data?"+qs.toString(),16000);
+      if(Number(d?.status)===200&&Array.isArray(d?.data)){
+        finMindStockInfoCache=new Map();
+        d.data.forEach(x=>finMindStockInfoCache.set(String(x.stock_id),{
+          name:x.stock_name||String(x.stock_id),market:x.type||"台股"
+        }));
+      }
+    }
+    return finMindStockInfoCache?.get(code)||null;
+  }catch(e){return null;}
+}
+async function ensureCustomHistory(code){
+  await loadHistory();
+  if(historyPayload?.tickers?.[code]) return historyPayload.tickers[code];
+
+  let bars=null,market="台股",source="";
+  try{
+    bars=await fetchFinMindHistory(code);
+    source="FinMind";
+  }catch(finErr){
+    try{
+      const y=await fetchYahooHistoryViaBrowser(code);
+      bars=y.bars; market=y.market; source="Yahoo Finance";
+    }catch(yErr){
+      throw new Error("找不到 "+code+" 的歷史資料（FinMind / Yahoo 都查詢失敗）");
+    }
+  }
+
+  const meta=await lookupFinMindStockName(code);
+  const info={
+    name:meta?.name||code,
+    market:meta?.market||market,
+    bars,
+    last_date:bars[bars.length-1]?.date||"",
+    dynamic:true,
+    source
+  };
+  historyPayload.tickers[code]=info;
+  return info;
+}
+function ensureTickerOption(selectId,code,name){
+  const sel=$(selectId);
+  if(!sel) return;
+  if(![...sel.options].some(o=>o.value===code)){
+    const opt=document.createElement("option");
+    opt.value=code;
+    opt.textContent=code+" "+(name||"");
+    sel.appendChild(opt);
+  }
+}
+async function loadCustomTicker(codeRaw,target){
+  const code=validateTaiwanStockCode(codeRaw);
+  const statusId=target==="trend"?"trendStatus":"fibStatus";
+  $(statusId).textContent="正在下載 "+code+" 歷史 K 線…";
+  const info=await ensureCustomHistory(code);
+  ensureTickerOption("trendTicker",code,info.name);
+  ensureTickerOption("fibTicker",code,info.name);
+
+  if(target==="trend"){
+    $("trendTicker").value=code;
+    $("trendCodeInput").value="";
+    renderTrend();
+  }else{
+    $("fibTicker").value=code;
+    $("fibCodeInput").value="";
+    fibBars=info.bars||[];
+    fibCandidates=buildFibCandidates(fibBars);
+    populateFibWaves(fibManualByTicker[code]?"manual":"0");
+    stopFibAnchorEdit();
+    renderFib();
+  }
+}
 function ensureTrendCursorPriceTag(){
   const chart=$("trendChart");
   let tag=chart.querySelector(".trend-cursor-price");
@@ -1298,6 +1454,13 @@ async function initTrendTab(){
       $("trendTicker").innerHTML=holdings.map(h=>'<option value="'+h.code+'">'+h.code+" "+h.name+"</option>").join("");
       $("trendTicker").value="4919";
       $("trendTicker").onchange=()=>renderTrend();
+      $("trendLoadCodeBtn").onclick=async()=>{
+        try{await loadCustomTicker($("trendCodeInput").value,"trend");}
+        catch(e){$("trendStatus").textContent="查詢失敗："+e.message;}
+      };
+      $("trendCodeInput").addEventListener("keydown",e=>{
+        if(e.key==="Enter") $("trendLoadCodeBtn").click();
+      });
       $("panBtn").onclick=()=>Plotly.relayout("trendChart",{dragmode:"pan"});
       $("zoomInBtn").onclick=()=>zoomTrend(0.72);
       $("zoomOutBtn").onclick=()=>zoomTrend(1.38);
@@ -1910,6 +2073,13 @@ async function initFibTab(){
         stopFibAnchorEdit();
         renderFib();
       };
+      $("fibLoadCodeBtn").onclick=async()=>{
+        try{await loadCustomTicker($("fibCodeInput").value,"fib");}
+        catch(e){$("fibStatus").textContent="查詢失敗："+e.message;}
+      };
+      $("fibCodeInput").addEventListener("keydown",e=>{
+        if(e.key==="Enter") $("fibLoadCodeBtn").click();
+      });
       $("fibWave").onchange=()=>{stopFibAnchorEdit();renderFib();};
       $("fibPrevBtn").onclick=()=>switchFibWave(-1);
       $("fibNextBtn").onclick=()=>switchFibWave(1);
