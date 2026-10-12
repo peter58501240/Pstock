@@ -36,15 +36,20 @@
 .trend-cursor-price{position:absolute;z-index:20;display:none;transform:translateY(-50%);padding:3px 6px;border-radius:4px;background:#111827;color:#fff;font-size:11px;font-weight:800;line-height:1.2;pointer-events:none;white-space:nowrap;box-shadow:0 1px 3px rgba(0,0,0,.18)}
 .trend-status{padding:9px 14px;color:var(--muted);font-size:12px;border-top:1px solid var(--line)}
 .trend-help{padding:12px 14px;background:#f8fafc;border-top:1px solid var(--line);font-size:12px;line-height:1.7;color:#475569}
-#trendPanel:fullscreen,#trendPanel.trend-fallback-fullscreen,#fibPanel:fullscreen,#fibPanel.fib-fallback-fullscreen{width:100vw;height:100vh;max-width:none;margin:0;border:0;border-radius:0;background:#fff;display:flex;flex-direction:column;overflow:hidden}
-#trendPanel.trend-fallback-fullscreen,#fibPanel.fib-fallback-fullscreen{position:fixed;inset:0;z-index:99999}
-#trendPanel:fullscreen .trend-toolbar,#trendPanel.trend-fallback-fullscreen .trend-toolbar,#fibPanel:fullscreen .trend-toolbar,#fibPanel.fib-fallback-fullscreen .trend-toolbar{flex:0 0 auto;padding:6px 8px;gap:6px}
-#trendPanel:fullscreen .trend-chart,#trendPanel.trend-fallback-fullscreen .trend-chart,#fibPanel:fullscreen .trend-chart,#fibPanel.fib-fallback-fullscreen .trend-chart{flex:1 1 auto;height:auto!important;min-height:0!important;width:100%!important}
-#trendPanel:fullscreen .trend-status,#trendPanel.trend-fallback-fullscreen .trend-status,#fibPanel:fullscreen .trend-status,#fibPanel.fib-fallback-fullscreen .trend-status{display:none}
+#trendPanel:fullscreen,#trendPanel.trend-fallback-fullscreen,#fibPanel:fullscreen,#fibPanel.fib-fallback-fullscreen,#patternPanel:fullscreen,#patternPanel.pattern-fallback-fullscreen{width:100vw;height:100vh;max-width:none;margin:0;border:0;border-radius:0;background:#fff;display:flex;flex-direction:column;overflow:hidden}
+#trendPanel.trend-fallback-fullscreen,#fibPanel.fib-fallback-fullscreen,#patternPanel.pattern-fallback-fullscreen{position:fixed;inset:0;z-index:99999}
+#trendPanel:fullscreen .trend-toolbar,#trendPanel.trend-fallback-fullscreen .trend-toolbar,#fibPanel:fullscreen .trend-toolbar,#fibPanel.fib-fallback-fullscreen .trend-toolbar,#patternPanel:fullscreen .trend-toolbar,#patternPanel.pattern-fallback-fullscreen .trend-toolbar{flex:0 0 auto;padding:6px 8px;gap:6px}
+#trendPanel:fullscreen .trend-chart,#trendPanel.trend-fallback-fullscreen .trend-chart,#fibPanel:fullscreen .trend-chart,#fibPanel.fib-fallback-fullscreen .trend-chart,#patternPanel:fullscreen .trend-chart,#patternPanel.pattern-fallback-fullscreen .trend-chart{flex:1 1 auto;height:auto!important;min-height:0!important;width:100%!important}
+#trendPanel:fullscreen .trend-status,#trendPanel.trend-fallback-fullscreen .trend-status,#fibPanel:fullscreen .trend-status,#fibPanel.fib-fallback-fullscreen .trend-status,#patternPanel:fullscreen .trend-status,#patternPanel.pattern-fallback-fullscreen .trend-status{display:none}
+.pattern-badge{display:inline-block;padding:3px 8px;border-radius:999px;font-weight:800;margin-right:5px;background:#eef2ff;color:#312e81}
+.pattern-badge.confirmed{background:#dcfce7;color:#166534}
+.pattern-badge.near_confirm{background:#fef3c7;color:#92400e}
+.pattern-badge.forming{background:#e0f2fe;color:#075985}
+.pattern-evidence{color:#475569;margin-left:4px}
 .fib-wave-select{min-width:260px;max-width:46vw}
 .fib-level-label{font-weight:800}
 @media(max-width:820px){
-  #trend .table-card,#fib .table-card{border-radius:12px}
+  #trend .table-card,#fib .table-card,#pattern .table-card{border-radius:12px}
   .trend-toolbar{padding:8px 8px;gap:6px}
   .trend-toolbar select{min-width:0;max-width:55vw}
   .trend-chart{height:76vh;min-height:580px}
@@ -66,6 +71,7 @@
     <button class="tab" data-tab="fees">費用與現金</button>
     <button class="tab" data-tab="trend">切線分析</button>
     <button class="tab" data-tab="fib">費波那契</button>
+    <button class="tab" data-tab="pattern">型態學分析</button>
   </div>
 
   <section id="overview" class="section active">
@@ -165,6 +171,27 @@
     </div>
   </section>
 
+  <section id="pattern" class="section">
+    <div id="patternPanel" class="card table-card">
+      <div class="trend-toolbar">
+        <select id="patternTicker"></select>
+        <input id="patternCodeInput" class="stock-code-input" inputmode="numeric" maxlength="6" placeholder="輸入股票代號">
+        <button id="patternLoadCodeBtn" class="btn">查詢</button>
+        <select id="patternStateMode">
+          <option value="all">形成中＋已確認</option>
+          <option value="confirmed">只顯示已確認</option>
+        </select>
+        <button id="patternPanBtn" class="btn">✋ 拖曳</button>
+        <button id="patternZoomInBtn" class="btn">＋ 放大</button>
+        <button id="patternZoomOutBtn" class="btn">－ 縮小</button>
+        <button id="patternResetBtn" class="btn">回復視野</button>
+        <button id="patternFullscreenBtn" class="btn">⛶ 全螢幕橫向</button>
+      </div>
+      <div id="patternChart" class="trend-chart"></div>
+      <div id="patternStatus" class="trend-status">型態資料讀取中…</div>
+    </div>
+  </section>
+
   <section id="realized" class="section">
     <div class="card table-card">
       <div class="head"><div><div class="title">已實現損益排名</div><div class="note">FIFO 配對；多筆交易依股數加權平均成本價與賣出價；最新價格與庫存相同：開啟頁面時抓即時價，失敗時用官方收盤價備援</div></div><button id="csvBtn" class="btn">下載 CSV</button></div>
@@ -248,6 +275,7 @@ document.querySelectorAll(".tab").forEach(b=>b.onclick=()=>{
   $(b.dataset.tab).classList.add("active");
   if(b.dataset.tab==="trend") initTrendTab();
   if(b.dataset.tab==="fib") initFibTab();
+  if(b.dataset.tab==="pattern") initPatternTab();
 });
 
 let pricePayload={prices:{}};
@@ -1093,7 +1121,9 @@ function autoTrendLines(bars){
     activeStartDate:bars[priorityStart]?.date||bars[0].date,
     majorSwings:major.length,
     minorSwings:minor.length,
-    structureReset:reset
+    structureReset:reset,
+    lines:selected,
+    trendDetails:{up,down}
   };
 }
 async function loadHistory(){
@@ -1234,17 +1264,18 @@ function ensureTickerOption(selectId,code,name){
 }
 async function loadCustomTicker(codeRaw,target){
   const code=validateTaiwanStockCode(codeRaw);
-  const statusId=target==="trend"?"trendStatus":"fibStatus";
+  const statusId=target==="trend"?"trendStatus":target==="fib"?"fibStatus":"patternStatus";
   $(statusId).textContent="正在下載 "+code+" 歷史 K 線…";
   const info=await ensureCustomHistory(code);
   ensureTickerOption("trendTicker",code,info.name);
   ensureTickerOption("fibTicker",code,info.name);
+  ensureTickerOption("patternTicker",code,info.name);
 
   if(target==="trend"){
     $("trendTicker").value=code;
     $("trendCodeInput").value="";
     renderTrend();
-  }else{
+  }else if(target==="fib"){
     $("fibTicker").value=code;
     $("fibCodeInput").value="";
     fibBars=info.bars||[];
@@ -1252,6 +1283,10 @@ async function loadCustomTicker(codeRaw,target){
     populateFibWaves(fibManualByTicker[code]?"manual":"0");
     stopFibAnchorEdit();
     renderFib();
+  }else{
+    $("patternTicker").value=code;
+    $("patternCodeInput").value="";
+    renderPattern();
   }
 }
 function ensureTrendCursorPriceTag(){
@@ -1475,6 +1510,590 @@ async function initTrendTab(){
   }
 }
 
+
+
+let patternInitialized=false;
+let patternListenerBound=false;
+let patternAutoScaling=false;
+let patternBars=[];
+let patternPinchState=null;
+let patternLastResult=null;
+
+function pClamp(v,a=0,b=100){return Math.max(a,Math.min(b,v));}
+function pStateText(s){return s==="confirmed"?"已確認":s==="near_confirm"?"接近確認":s==="failed"?"失效":"形成中";}
+function pScoreFloor(state){return state==="confirmed"?78:state==="near_confirm"?76:72;}
+function pVolMA(bars,i,n=20){
+  let s=0,c=0;
+  for(let k=Math.max(0,i-n+1);k<=i;k++){const v=Number(bars[k].volume);if(Number.isFinite(v)){s+=v;c++;}}
+  return c?s/c:0;
+}
+function pFitLine(points){
+  if(!points||points.length<2) return null;
+  const n=points.length;
+  const mx=points.reduce((s,p)=>s+p.i,0)/n;
+  const my=points.reduce((s,p)=>s+p.y,0)/n;
+  let num=0,den=0;
+  for(const p of points){num+=(p.i-mx)*(p.y-my);den+=(p.i-mx)*(p.i-mx);}
+  const slope=den?num/den:0;
+  return {slope,intercept:my-slope*mx,points};
+}
+function pLineY(line,i){return line?line.intercept+line.slope*i:null;}
+function pLineFrom2(a,b){
+  const d=b.i-a.i;
+  if(!d) return {slope:0,intercept:a.y,points:[a,b]};
+  const slope=(b.y-a.y)/d;
+  return {slope,intercept:a.y-slope*a.i,points:[a,b]};
+}
+function pLineResidual(line,pts,base){
+  if(!line||!pts.length) return 99;
+  return pts.reduce((s,p)=>s+Math.abs(p.y-pLineY(line,p.i))/Math.max(atrAt(base.atr,p.i,base.bars),0.01),0)/pts.length;
+}
+function pHorizontalQuality(points,base){
+  if(points.length<2) return 0;
+  const avg=points.reduce((s,p)=>s+p.y,0)/points.length;
+  const span=Math.max(1,points[points.length-1].i-points[0].i);
+  const line=pFitLine(points);
+  const a=atrAt(base.atr,points[points.length-1].i,base.bars);
+  const range=Math.max(...points.map(p=>p.y))-Math.min(...points.map(p=>p.y));
+  const tol=Math.max(a*0.75,avg*0.025);
+  const slopeMove=Math.abs(line.slope*span);
+  return pClamp(1-Math.max(range,slopeMove)/Math.max(tol,0.01),0,1);
+}
+function pPriorTrend(base,startI,lookback=35){
+  const a=Math.max(0,startI-lookback),b=Math.max(a+4,startI-1);
+  const pts=[];
+  for(let i=a;i<=b;i++) pts.push({i,y:Number(base.bars[i].close)});
+  const line=pFitLine(pts);
+  if(!line) return "flat";
+  const move=line.slope*(b-a);
+  const atr=atrAt(base.atr,b,base.bars);
+  if(move>atr*1.2) return "up";
+  if(move<-atr*1.2) return "down";
+  return "flat";
+}
+function pDirectionalState(base,dir,trigger){
+  const i=base.lastI,a=atrAt(base.atr,i,base.bars),close=Number(base.bars[i].close);
+  const prev=Number(base.bars[Math.max(base.startI,i-1)].close);
+  const confirmed=dir==="up"
+    ? (close>trigger+a*0.15 || (close>trigger&&prev>trigger))
+    : (close<trigger-a*0.15 || (close<trigger&&prev<trigger));
+  if(confirmed) return {state:"confirmed",confirmedI:i};
+  if(Math.abs(close-trigger)<=a*0.60) return {state:"near_confirm",confirmedI:null};
+  return {state:"forming",confirmedI:null};
+}
+function pVolumeScore(base,state){
+  const i=base.lastI,ma=pVolMA(base.bars,i,20),v=Number(base.bars[i].volume);
+  if(!ma||!v) return 0;
+  if(state==="confirmed"){
+    if(v>=ma*1.60) return 10;
+    if(v>=ma*1.35) return 7;
+  }
+  return 0;
+}
+function pBase(bars){
+  const atr=calcATR(bars,14);
+  const major=buildSwings(bars,atr,2.5).filter(p=>!p.forming).map(p=>({...p,strength:"major"}));
+  const minor=buildSwings(bars,atr,1.5).filter(p=>!p.forming).map(p=>({...p,strength:"minor"}));
+  const local=localStructurePivots(bars,atr,3);
+  const pivots=mergePivots([major,minor,local]);
+  return {bars,atr,major,minor,local,pivots,lastI:bars.length-1};
+}
+function pCtx(base,startI,label){
+  const endI=base.lastI;
+  return {...base,startI,endI,label,
+    pivots:base.pivots.filter(p=>p.i>=startI&&p.i<=endI),
+    major:base.major.filter(p=>p.i>=startI&&p.i<=endI),
+    minor:base.minor.filter(p=>p.i>=startI&&p.i<=endI)
+  };
+}
+function pLineDef(role,line,startI,endI,source="pattern_only"){
+  return {role,i0:startI,y0:pLineY(line,startI),i1:endI,y1:pLineY(line,endI),source};
+}
+function pHLine(role,level,startI,endI,source="pattern_only"){
+  return {role,i0:startI,y0:level,i1:endI,y1:level,source};
+}
+function pDetection(o){
+  return {
+    id:o.id,name:o.name,family:o.family,bias:o.bias||"neutral",state:o.state||"forming",
+    score:pClamp(Math.round(o.score||0)),window:o.window,anchors:o.anchors||[],
+    lines:o.lines||[],trigger:o.trigger||null,invalidation:o.invalidation||null,
+    target:o.target||null,evidence:o.evidence||[],warnings:o.warnings||[],
+    exclusiveKey:o.exclusiveKey||o.family,scale:o.scale||""
+  };
+}
+function pHighLow(ctx){
+  const highs=ctx.pivots.filter(p=>p.type==="H");
+  const lows=ctx.pivots.filter(p=>p.type==="L");
+  return {highs,lows};
+}
+function pConvergence(upper,lower,startI,endI){
+  const d0=pLineY(upper,startI)-pLineY(lower,startI);
+  const d1=pLineY(upper,endI)-pLineY(lower,endI);
+  if(!(d0>0)||!(d1>0)) return 0;
+  return pClamp((d0-d1)/d0,0,1);
+}
+function pWindowLinePoints(points,maxN=4){return points.slice(-maxN);}
+function pCommonScore(geom,anchors,prior,state,vol,noise=0){
+  const confirm=state==="confirmed"?15:state==="near_confirm"?10:5;
+  return pClamp(geom+anchors+prior+confirm+vol-noise);
+}
+
+// 01/02/03 Triangles
+function pDetectTriangle(ctx,kind){
+  const {highs,lows}=pHighLow(ctx);
+  const H=pWindowLinePoints(highs,4),L=pWindowLinePoints(lows,4);
+  if(H.length<2||L.length<2) return null;
+  const upper=pFitLine(H),lower=pFitLine(L);
+  const startI=Math.max(ctx.startI,Math.min(H[0].i,L[0].i));
+  const endI=ctx.endI;
+  const conv=pConvergence(upper,lower,startI,endI);
+  const hq=pHorizontalQuality(H,ctx),lq=pHorizontalQuality(L,ctx);
+  const a=atrAt(ctx.atr,endI,ctx.bars);
+  const uMove=upper.slope*Math.max(1,endI-startI),lMove=lower.slope*Math.max(1,endI-startI);
+  const minSlope=Math.max(a*0.35,Number(ctx.bars[endI].close)*0.007);
+
+  let id,name,bias,dir,geom=0,exclusiveKey="triangle",triggerLine,invalidation,evidence=[];
+  if(kind==="asc"){
+    if(hq<0.30||lMove<minSlope||conv<0.12) return null;
+    id=1;name="上升三角形";bias="bullish";dir="up";triggerLine={slope:0,intercept:H.reduce((s,p)=>s+p.y,0)/H.length};
+    geom=24+hq*7+Math.min(4,conv*10);
+    invalidation=pLineY(lower,endI);
+    evidence=["壓力近水平","低點連續墊高","上下距離收斂"];
+  }else if(kind==="desc"){
+    if(lq<0.30||uMove>-minSlope||conv<0.12) return null;
+    id=2;name="下降三角形";bias="bearish";dir="down";triggerLine={slope:0,intercept:L.reduce((s,p)=>s+p.y,0)/L.length};
+    geom=24+lq*7+Math.min(4,conv*10);
+    invalidation=pLineY(upper,endI);
+    evidence=["支撐近水平","高點依序下移","上下距離收斂"];
+  }else{
+    if(upper.slope>=0||lower.slope<=0||conv<0.16||hq>0.68||lq>0.68) return null;
+    id=3;name="對稱三角形";bias="neutral";
+    const upTrig=pLineY(upper,endI),dnTrig=pLineY(lower,endI),close=Number(ctx.bars[endI].close);
+    dir=Math.abs(close-upTrig)<=Math.abs(close-dnTrig)?"up":"down";
+    triggerLine=dir==="up"?upper:lower;
+    geom=26+Math.min(8,conv*18);
+    invalidation=dir==="up"?dnTrig:upTrig;
+    evidence=["高點降低","低點墊高","上下邊界向右收斂"];
+  }
+  const trigger=pLineY(triggerLine,endI);
+  const st=pDirectionalState(ctx,dir,trigger);
+  const prior=pPriorTrend(ctx,startI);
+  const priorPts=(kind==="asc"&&prior==="up")||(kind==="desc"&&prior==="down")?12:6;
+  const anchorPts=Math.min(20,8+H.length*2+L.length*2);
+  const noise=(pLineResidual(upper,H,ctx)+pLineResidual(lower,L,ctx))*3;
+  const score=pCommonScore(geom,anchorPts,priorPts,st.state,pVolumeScore(ctx,st.state),noise);
+  return pDetection({
+    id,name,family:"triangle",exclusiveKey,bias,state:st.state,score,scale:ctx.label,
+    window:{startI,endI},anchors:[...H.slice(-2),...L.slice(-2)],
+    lines:[pLineDef("upper",upper,startI,endI),pLineDef("lower",lower,startI,endI)],
+    trigger:{type:dir==="up"?"close_above":"close_below",price:trigger,confirmedI:st.confirmedI},
+    invalidation:{type:dir==="up"?"close_below":"close_above",price:invalidation},
+    target:{price:null,method:"height"},evidence,warnings:st.state==="forming"?["尚未有效突破"]:[]});
+}
+
+// 04/05 Rectangle
+function pDetectBox(ctx,dir){
+  const {highs,lows}=pHighLow(ctx),H=pWindowLinePoints(highs,5),L=pWindowLinePoints(lows,5);
+  if(H.length<2||L.length<2) return null;
+  const hq=pHorizontalQuality(H,ctx),lq=pHorizontalQuality(L,ctx);
+  if(hq<0.42||lq<0.42) return null;
+  const top=H.reduce((s,p)=>s+p.y,0)/H.length,bot=L.reduce((s,p)=>s+p.y,0)/L.length;
+  const a=atrAt(ctx.atr,ctx.endI,ctx.bars);
+  if(top-bot<a*1.4) return null;
+  const close=Number(ctx.bars[ctx.endI].close);
+  const dTop=Math.abs(close-top),dBot=Math.abs(close-bot);
+  if(dir==="up"&&dTop>dBot*1.15&&close<top) return null;
+  if(dir==="down"&&dBot>dTop*1.15&&close>bot) return null;
+  const trigger=dir==="up"?top:bot,st=pDirectionalState(ctx,dir,trigger);
+  const geom=27+(hq+lq)*4;
+  const anchors=Math.min(20,8+H.length*2+L.length*2);
+  const score=pCommonScore(geom,anchors,7,st.state,pVolumeScore(ctx,st.state),0);
+  const id=dir==="up"?4:5,name=dir==="up"?"箱型整理向上突破":"箱型整理向下跌破";
+  return pDetection({id,name,family:"box",exclusiveKey:"box",bias:dir==="up"?"bullish":"bearish",state:st.state,score,scale:ctx.label,
+    window:{startI:Math.min(H[0].i,L[0].i),endI:ctx.endI},anchors:[...H.slice(-2),...L.slice(-2)],
+    lines:[pHLine("resistance",top,Math.min(H[0].i,L[0].i),ctx.endI),pHLine("support",bot,Math.min(H[0].i,L[0].i),ctx.endI)],
+    trigger:{type:dir==="up"?"close_above":"close_below",price:trigger,confirmedI:st.confirmedI},
+    invalidation:{type:dir==="up"?"close_below":"close_above",price:dir==="up"?bot:top},
+    evidence:["箱頂與箱底近水平","上下界各有多次測試"],warnings:st.state==="forming"?["仍在箱體內"]:[]});
+}
+
+function pFlagGeometry(ctx,bull,pennant=false){
+  const end=ctx.endI,aNow=atrAt(ctx.atr,end,ctx.bars),price=Number(ctx.bars[end].close);
+  let best=null;
+  for(let len=4;len<=20;len++){
+    const split=end-len+1;
+    if(split<=ctx.startI+6) continue;
+    const poleStartMin=Math.max(ctx.startI,split-20),poleEnd=split-1;
+    let poleStart=poleStartMin;
+    if(bull){
+      let min=Infinity;for(let i=poleStartMin;i<=Math.max(poleStartMin,poleEnd-4);i++) if(Number(ctx.bars[i].low)<min){min=Number(ctx.bars[i].low);poleStart=i;}
+    }else{
+      let max=-Infinity;for(let i=poleStartMin;i<=Math.max(poleStartMin,poleEnd-4);i++) if(Number(ctx.bars[i].high)>max){max=Number(ctx.bars[i].high);poleStart=i;}
+    }
+    const pole0=bull?Number(ctx.bars[poleStart].low):Number(ctx.bars[poleStart].high);
+    const pole1=bull?Number(ctx.bars[poleEnd].high):Number(ctx.bars[poleEnd].low);
+    const pole=bull?pole1-pole0:pole0-pole1;
+    if(pole<Math.max(aNow*4,Math.abs(pole0)*0.08)) continue;
+    const H=[],L=[];
+    for(let i=split;i<=end;i++){H.push({i,y:Number(ctx.bars[i].high)});L.push({i,y:Number(ctx.bars[i].low)});}
+    const upper=pFitLine(H),lower=pFitLine(L);
+    const width0=pLineY(upper,split)-pLineY(lower,split),width1=pLineY(upper,end)-pLineY(lower,end);
+    if(width0<=0||width1<=0) continue;
+    const avgSlope=(upper.slope+lower.slope)/2;
+    const slopeDiff=Math.abs(upper.slope-lower.slope)*len;
+    const parallel=slopeDiff<=Math.max(aNow*0.8,price*0.018);
+    const converging=width1<width0*0.78;
+    if(pennant){
+      if(!(upper.slope<0&&lower.slope>0&&converging)) continue;
+    }else{
+      if(!parallel) continue;
+      if(bull&&avgSlope>aNow*0.08) continue;
+      if(!bull&&avgSlope<-aNow*0.08) continue;
+    }
+    const consLow=Math.min(...L.map(p=>p.y)),consHigh=Math.max(...H.map(p=>p.y));
+    const retrace=bull?(pole1-consLow)/pole:(consHigh-pole1)/pole;
+    if(retrace>0.68) continue;
+    const poleVol=pVolMA(ctx.bars,poleEnd,Math.min(10,poleEnd-poleStart+1));
+    let consVol=0;for(let i=split;i<=end;i++) consVol+=Number(ctx.bars[i].volume)||0;consVol/=len;
+    const volContract=poleVol>0&&consVol<=poleVol*0.85;
+    const trigger=bull?pLineY(upper,end):pLineY(lower,end);
+    const st=pDirectionalState(ctx,bull?"up":"down",trigger);
+    const score=26+Math.min(10,pole/aNow)+8*(1-Math.min(1,retrace))+8+(volContract?7:0)+(st.state==="confirmed"?15:st.state==="near_confirm"?10:5)+pVolumeScore(ctx,st.state);
+    const cand={score,split,poleStart,poleEnd,upper,lower,trigger,st,volContract,retrace};
+    if(!best||cand.score>best.score) best=cand;
+  }
+  return best;
+}
+function pDetectFlag(ctx,bull,pennant=false){
+  const g=pFlagGeometry(ctx,bull,pennant); if(!g) return null;
+  const id=pennant?(bull?14:15):(bull?6:7);
+  const name=pennant?(bull?"多頭三角旗":"空頭三角旗"):(bull?"多頭旗形":"空頭旗形");
+  const family=pennant?"pennant":"flag";
+  const score=pClamp(g.score+(g.volContract?4:0));
+  return pDetection({id,name,family,exclusiveKey:bull?"bull_continuation":"bear_continuation",bias:bull?"bullish":"bearish",state:g.st.state,score,scale:ctx.label,
+    window:{startI:g.poleStart,endI:ctx.endI},
+    anchors:[{role:"pole0",i:g.poleStart,date:ctx.bars[g.poleStart].date,price:bull?ctx.bars[g.poleStart].low:ctx.bars[g.poleStart].high},
+             {role:"pole1",i:g.poleEnd,date:ctx.bars[g.poleEnd].date,price:bull?ctx.bars[g.poleEnd].high:ctx.bars[g.poleEnd].low}],
+    lines:[pLineDef("upper",g.upper,g.split,ctx.endI),pLineDef("lower",g.lower,g.split,ctx.endI),
+           {role:"trend",i0:g.poleStart,y0:bull?Number(ctx.bars[g.poleStart].low):Number(ctx.bars[g.poleStart].high),i1:g.poleEnd,y1:bull?Number(ctx.bars[g.poleEnd].high):Number(ctx.bars[g.poleEnd].low),source:"pattern_only"}],
+    trigger:{type:bull?"close_above":"close_below",price:g.trigger,confirmedI:g.st.confirmedI},
+    invalidation:{type:bull?"close_below":"close_above",price:bull?pLineY(g.lower,ctx.endI):pLineY(g.upper,ctx.endI)},
+    evidence:[bull?"前置快速上漲旗桿":"前置快速下跌旗桿",pennant?"整理區向內收斂":"整理區近似平行",g.volContract?"整理期間量縮":"整理量能未明顯放大"],
+    warnings:g.st.state==="forming"?["尚未突破整理邊界"]:[]});
+}
+
+// 08/09 Wedges
+function pDetectWedge(ctx,rising){
+  const {highs,lows}=pHighLow(ctx),H=pWindowLinePoints(highs,4),L=pWindowLinePoints(lows,4);
+  if(H.length<2||L.length<2||H.length+L.length<4) return null;
+  const upper=pFitLine(H),lower=pFitLine(L),startI=Math.max(ctx.startI,Math.min(H[0].i,L[0].i)),endI=ctx.endI;
+  const conv=pConvergence(upper,lower,startI,endI);
+  if(conv<0.12) return null;
+  if(rising){
+    if(!(upper.slope>0&&lower.slope>upper.slope)) return null;
+  }else{
+    if(!(upper.slope<lower.slope&&lower.slope<0)) return null;
+  }
+  const trigger=rising?pLineY(lower,endI):pLineY(upper,endI);
+  const dir=rising?"down":"up",st=pDirectionalState(ctx,dir,trigger);
+  const geom=27+Math.min(8,conv*18),anchors=Math.min(20,8+H.length*2+L.length*2);
+  const prior=pPriorTrend(ctx,startI),priorPts=(rising&&prior==="up")||(!rising&&prior==="down")?10:6;
+  const noise=(pLineResidual(upper,H,ctx)+pLineResidual(lower,L,ctx))*3;
+  const score=pCommonScore(geom,anchors,priorPts,st.state,pVolumeScore(ctx,st.state),noise);
+  return pDetection({id:rising?8:9,name:rising?"上升楔形":"下降楔形",family:"wedge",exclusiveKey:"wedge",bias:rising?"bearish":"bullish",state:st.state,score,scale:ctx.label,
+    window:{startI,endI},anchors:[...H.slice(-2),...L.slice(-2)],
+    lines:[pLineDef("upper",upper,startI,endI),pLineDef("lower",lower,startI,endI)],
+    trigger:{type:rising?"close_below":"close_above",price:trigger,confirmedI:st.confirmedI},
+    invalidation:{type:rising?"close_above":"close_below",price:rising?pLineY(upper,endI):pLineY(lower,endI)},
+    evidence:[rising?"上下邊界同步上升":"上下邊界同步下降","上下距離向右收斂"],warnings:[]});
+}
+
+function pFindLastSequence(ctx,types){
+  const p=ctx.pivots;
+  for(let end=p.length-1;end>=types.length-1;end--){
+    const seq=p.slice(end-types.length+1,end+1);
+    if(seq.every((x,i)=>x.type===types[i])) return seq;
+  }
+  return null;
+}
+// 10/11 Double
+function pDetectDouble(ctx,bottom){
+  const seq=pFindLastSequence(ctx,bottom?["L","H","L"]:["H","L","H"]); if(!seq) return null;
+  const [a,m,b]=seq,atr=atrAt(ctx.atr,b.i,ctx.bars),tol=Math.max(atr*0.75,Math.max(a.y,b.y)*0.03);
+  if(Math.abs(a.y-b.y)>tol) return null;
+  if(Math.abs(m.y-(a.y+b.y)/2)<atr*1.5) return null;
+  const prior=pPriorTrend(ctx,a.i);
+  if(bottom&&prior!=="down") return null;
+  if(!bottom&&prior!=="up") return null;
+  const trigger=m.y,dir=bottom?"up":"down",st=pDirectionalState(ctx,dir,trigger);
+  const similarity=1-Math.min(1,Math.abs(a.y-b.y)/tol);
+  const score=pCommonScore(27+similarity*7,16,15,st.state,pVolumeScore(ctx,st.state),0);
+  return pDetection({id:bottom?10:11,name:bottom?"雙底":"雙頂",family:"double",exclusiveKey:bottom?"bottom_reversal":"top_reversal",bias:bottom?"bullish":"bearish",state:st.state,score,scale:ctx.label,
+    window:{startI:a.i,endI:ctx.endI},anchors:[{...a,role:bottom?"L1":"H1"},{...m,role:"neck"},{...b,role:bottom?"L2":"H2"}],
+    lines:[pHLine("neckline",trigger,a.i,ctx.endI)],
+    trigger:{type:bottom?"close_above":"close_below",price:trigger,confirmedI:st.confirmedI},
+    invalidation:{type:bottom?"close_below":"close_above",price:bottom?Math.min(a.y,b.y):Math.max(a.y,b.y)},
+    evidence:[bottom?"兩個低點落在同一支撐區":"兩個高點落在同一壓力區","中間反彈／回落幅度足夠",bottom?"前置下降趨勢":"前置上升趨勢"],warnings:[]});
+}
+
+// 12/13 Head & shoulders
+function pDetectHeadShoulders(ctx,inverse){
+  const seq=pFindLastSequence(ctx,inverse?["L","H","L","H","L"]:["H","L","H","L","H"]); if(!seq) return null;
+  const [s1,n1,h,n2,s2]=seq,a=atrAt(ctx.atr,h.i,ctx.bars);
+  const shoulderTol=Math.max(a*0.85,Math.max(s1.y,s2.y)*0.04);
+  if(Math.abs(s1.y-s2.y)>shoulderTol) return null;
+  if(inverse){
+    if(!(h.y<Math.min(s1.y,s2.y)-a*0.7)) return null;
+  }else{
+    if(!(h.y>Math.max(s1.y,s2.y)+a*0.7)) return null;
+  }
+  const prior=pPriorTrend(ctx,s1.i);
+  if(inverse&&prior!=="down") return null;
+  if(!inverse&&prior!=="up") return null;
+  const neck=pLineFrom2(n1,n2),trigger=pLineY(neck,ctx.endI),dir=inverse?"up":"down",st=pDirectionalState(ctx,dir,trigger);
+  const sym=1-Math.min(1,Math.abs(s1.y-s2.y)/shoulderTol);
+  const score=pCommonScore(29+sym*6,18,15,st.state,pVolumeScore(ctx,st.state),pLineResidual(neck,[n1,n2],ctx)*2);
+  return pDetection({id:inverse?12:13,name:inverse?"頭肩底":"頭肩頂",family:"head_shoulders",exclusiveKey:inverse?"bottom_reversal":"top_reversal",bias:inverse?"bullish":"bearish",state:st.state,score,scale:ctx.label,
+    window:{startI:s1.i,endI:ctx.endI},
+    anchors:[{...s1,role:"左肩"},{...h,role:"頭"},{...s2,role:"右肩"}],
+    lines:[pLineDef("neckline",neck,n1.i,ctx.endI)],
+    trigger:{type:inverse?"close_above":"close_below",price:trigger,confirmedI:st.confirmedI},
+    invalidation:{type:inverse?"close_below":"close_above",price:s2.y},
+    evidence:["左肩、頭、右肩結構完整","頭部相較兩肩明顯突出","頸線由兩個反應點形成"],warnings:[]});
+}
+
+// 16 Trendline breakout/breakdown: re-use the already qualified Pstock trendline engine.
+function pDetectTrendBreak(base,bull){
+  const last=base.lastI;
+  for(let cut=2;cut<=6;cut++){
+    const prefix=base.bars.slice(0,last-cut+1);
+    if(prefix.length<25) continue;
+    const prior=autoTrendLines(prefix);
+    const t=bull?prior.trendDetails?.down:prior.trendDetails?.up;
+    if(!t) continue;
+    const y=projectedY(t,last),a=atrAt(base.atr,last,base.bars),close=Number(base.bars[last].close);
+    const prev=Number(base.bars[last-1].close);
+    const crossed=bull?(close>y+a*0.15&&prev<=projectedY(t,last-1)+a*0.20):(close<y-a*0.15&&prev>=projectedY(t,last-1)-a*0.20);
+    const near=Math.abs(close-y)<=a*0.60;
+    if(!crossed&&!near) continue;
+    const state=crossed?"confirmed":"near_confirm";
+    const score=pClamp(70+(crossed?15:10)+Math.min(10,(t.confirmations||0)*3)+pVolumeScore(base,state));
+    return pDetection({id:16,name:bull?"下降趨勢線突破":"上升趨勢線跌破",family:"trend_break",exclusiveKey:"trend_break",bias:bull?"bullish":"bearish",state,score,scale:"近期",
+      window:{startI:t.p1.i,endI:last},anchors:[{...t.p1,role:"A"},{...t.p2,role:"B"}],
+      lines:[{role:"trend",i0:t.p1.i,y0:t.p1.y,i1:last,y1:y,source:"existing_trend"}],
+      trigger:{type:bull?"close_above":"close_below",price:y,confirmedI:crossed?last:null},
+      invalidation:null,evidence:["直接沿用切線分析已認可趨勢線",crossed?"收盤已有效穿越":"價格已接近趨勢線"],warnings:[]});
+  }
+  return null;
+}
+
+function pScanPatterns(bars,mode="all"){
+  if(!bars||bars.length<25) return {detections:[],primary:null,secondary:null,ambiguous:false};
+  const base=pBase(bars),last=base.lastI;
+  const windows=[
+    {label:"短期",n:40,min:15},
+    {label:"中期",n:90,min:35},
+    {label:"長期",n:180,min:80}
+  ].filter(w=>bars.length>=w.min);
+  const detections=[];
+  for(const w of windows){
+    const ctx=pCtx(base,Math.max(0,last-w.n+1),w.label);
+    const ds=[
+      pDetectTriangle(ctx,"asc"),pDetectTriangle(ctx,"desc"),pDetectTriangle(ctx,"sym"),
+      pDetectBox(ctx,"up"),pDetectBox(ctx,"down"),
+      pDetectFlag(ctx,true,false),pDetectFlag(ctx,false,false),
+      pDetectWedge(ctx,true),pDetectWedge(ctx,false),
+      pDetectDouble(ctx,true),pDetectDouble(ctx,false),
+      pDetectHeadShoulders(ctx,true),pDetectHeadShoulders(ctx,false),
+      pDetectFlag(ctx,true,true),pDetectFlag(ctx,false,true)
+    ].filter(Boolean);
+    detections.push(...ds);
+  }
+  detections.push(pDetectTrendBreak(base,true),pDetectTrendBreak(base,false));
+
+  let valid=detections.filter(Boolean).filter(d=>d.score>=pScoreFloor(d.state));
+  if(mode==="confirmed") valid=valid.filter(d=>d.state==="confirmed");
+
+  // De-duplicate same detector across 15~180 bar windows.
+  const byId=new Map();
+  for(const d of valid){
+    const old=byId.get(d.id);
+    if(!old||d.score>old.score) byId.set(d.id,d);
+  }
+  valid=[...byId.values()].sort((a,b)=>b.score-a.score);
+
+  if(!valid.length) return {detections:[],primary:null,secondary:null,ambiguous:false};
+  const first=valid[0],second=valid[1];
+  if(second&&first.exclusiveKey===second.exclusiveKey&&Math.abs(first.score-second.score)<6){
+    return {detections:valid,primary:null,secondary:null,ambiguous:true,ambiguousPair:[first,second]};
+  }
+  const secondary=valid.find(d=>d!==first&&d.exclusiveKey!==first.exclusiveKey&&d.score>=72)||null;
+  return {detections:valid,primary:first,secondary,ambiguous:false};
+}
+
+function pRoleStyle(role,secondary=false){
+  const alpha=secondary?0.52:0.95;
+  if(role==="support"||role==="lower") return {color:"rgba(37,99,235,"+alpha+")",dash:"solid"};
+  if(role==="resistance"||role==="upper") return {color:"rgba(234,88,12,"+alpha+")",dash:"solid"};
+  if(role==="neckline") return {color:"rgba(220,38,38,"+alpha+")",dash:"dash"};
+  if(role==="trend") return {color:"rgba(147,51,234,"+alpha+")",dash:"solid"};
+  return {color:"rgba(100,116,139,"+alpha+")",dash:"dash"};
+}
+function pOverlay(d,bars,secondary=false){
+  const shapes=[],annotations=[],traces=[];
+  if(!d) return {shapes,annotations,traces};
+  const end=Math.min(bars.length-1,d.window.endI+8);
+  const ys=[];
+  for(const line of d.lines){
+    const style=pRoleStyle(line.role,secondary);
+    const i0=Math.max(0,line.i0),i1=Math.min(end,line.i1>d.window.endI?line.i1:end);
+    const slope=(line.y1-line.y0)/Math.max(1,line.i1-line.i0);
+    const y1=line.y0+slope*(i1-line.i0);
+    shapes.push({type:"line",xref:"x",yref:"y",x0:bars[i0].date,y0:line.y0,x1:bars[i1].date,y1,
+      line:{color:style.color,width:secondary?1.5:2.3,dash:style.dash},layer:"above"});
+    ys.push(line.y0,y1);
+  }
+  if(d.trigger&&Number.isFinite(Number(d.trigger.price))){
+    const s=Math.max(d.window.startI,d.window.endI-8);
+    shapes.push({type:"line",xref:"x",yref:"y",x0:bars[s].date,y0:d.trigger.price,x1:bars[end].date,y1:d.trigger.price,
+      line:{color:d.state==="confirmed"?"#16a34a":"#f59e0b",width:1.6,dash:"dot"},layer:"above"});
+    ys.push(Number(d.trigger.price));
+  }
+  if(d.invalidation&&Number.isFinite(Number(d.invalidation.price))){
+    const s=Math.max(d.window.startI,d.window.endI-6);
+    shapes.push({type:"line",xref:"x",yref:"y",x0:bars[s].date,y0:d.invalidation.price,x1:bars[end].date,y1:d.invalidation.price,
+      line:{color:"rgba(100,116,139,.65)",width:1.2,dash:"dash"},layer:"above"});
+    ys.push(Number(d.invalidation.price));
+  }
+  if(d.anchors.length){
+    const ax=[],ay=[],at=[];
+    for(const a of d.anchors){
+      if(!Number.isFinite(a.i)) continue;
+      ax.push(bars[a.i]?.date||a.date); ay.push(Number(a.y??a.price)); at.push(a.role||"");
+    }
+    if(ax.length) traces.push({type:"scatter",mode:"markers+text",name:(secondary?"次級":"主要")+"型態錨點",
+      x:ax,y:ay,yaxis:"y",marker:{size:secondary?7:9,symbol:"circle-open",line:{width:1.7}},
+      text:at,textposition:"top center",showlegend:false,hovertemplate:"%{x|%-m/%-d}<br>%{y:.2f}<extra></extra>"});
+  }
+  const labelY=ys.length?Math.max(...ys):Number(bars[d.window.endI].high);
+  annotations.push({x:bars[Math.min(end,bars.length-1)].date,y:labelY,xref:"x",yref:"y",
+    text:d.name+"｜"+pStateText(d.state)+" "+d.score,showarrow:false,xanchor:"right",yanchor:"bottom",
+    font:{size:secondary?10:12,color:secondary?"#475569":"#111827"},bgcolor:"rgba(255,255,255,.92)",
+    bordercolor:secondary?"#94a3b8":"#111827",borderwidth:1,borderpad:4});
+  return {shapes,annotations,traces};
+}
+
+function patternCurrentRange(){
+  const chart=$("patternChart"),r=chart?.layout?.xaxis?.range;
+  if(Array.isArray(r)&&r.length===2) return [new Date(r[0]).getTime(),new Date(r[1]).getTime()];
+  if(patternBars.length) return [dateMs(patternBars[Math.max(0,patternBars.length-180)].date+"T00:00:00"),dateMs(patternBars[patternBars.length-1].date+"T00:00:00")];
+  return null;
+}
+function updatePatternDateTicks(){
+  const r=patternCurrentRange(); if(!r) return;
+  const days=Math.max(1,(r[1]-r[0])/86400000);
+  let dtick;if(days<=35)dtick=5*86400000;else if(days<=70)dtick=7*86400000;else if(days<=140)dtick=14*86400000;else if(days<=280)dtick=30*86400000;else dtick=60*86400000;
+  Plotly.relayout("patternChart",{"xaxis.dtick":dtick,"xaxis.tickformat":days>560?"%Y/%-m":"%-m/%-d","xaxis.hoverformat":"%Y/%-m/%-d"});
+}
+function patternVisibleBars(){
+  const r=patternCurrentRange();if(!r)return patternBars;
+  return patternBars.filter(b=>{const t=dateMs(b.date+"T00:00:00");return t!==null&&t>=r[0]&&t<=r[1];});
+}
+async function autoscalePatternY(){
+  if(patternAutoScaling)return;
+  const bars=patternVisibleBars();if(!bars.length)return;
+  let lo=Math.min(...bars.map(b=>Number(b.low))),hi=Math.max(...bars.map(b=>Number(b.high)));
+  const vol=Math.max(...bars.map(b=>Number(b.volume)||0));
+  const pad=Math.max((hi-lo)*0.06,hi*0.006);
+  patternAutoScaling=true;
+  try{await Plotly.relayout("patternChart",{"yaxis.range":[Math.max(0,lo-pad),hi+pad],"yaxis2.range":[0,vol>0?vol*1.15:1]});}
+  finally{patternAutoScaling=false;}
+}
+function schedulePatternAutoscale(){
+  const chart=$("patternChart");clearTimeout(chart._patternTimer);chart._patternTimer=setTimeout(()=>autoscalePatternY(),70);
+}
+async function zoomPattern(factor){
+  const r=patternCurrentRange();if(!r)return;const mid=(r[0]+r[1])/2,half=(r[1]-r[0])*factor/2;
+  await Plotly.relayout("patternChart",{"xaxis.range":[new Date(mid-half),new Date(mid+half)]});updatePatternDateTicks();schedulePatternAutoscale();
+}
+async function resetPatternZoom(){
+  if(!patternBars.length)return;
+  const start=patternLastResult?.primary?Math.max(0,patternLastResult.primary.window.startI-10):Math.max(0,patternBars.length-180);
+  await Plotly.relayout("patternChart",{"xaxis.range":[patternBars[start].date,patternBars[patternBars.length-1].date]});updatePatternDateTicks();schedulePatternAutoscale();
+}
+function bindPatternPinch(){
+  const chart=$("patternChart");if(chart.dataset.pinchBound==="1")return;chart.dataset.pinchBound="1";
+  const dist=t=>Math.hypot(t[0].clientX-t[1].clientX,t[0].clientY-t[1].clientY);
+  chart.addEventListener("touchstart",e=>{if(e.touches.length!==2)return;const r=patternCurrentRange();if(r)patternPinchState={distance:dist(e.touches),range:r};},{passive:true});
+  chart.addEventListener("touchmove",e=>{if(e.touches.length!==2||!patternPinchState)return;e.preventDefault();const d=dist(e.touches);if(!d)return;const scale=patternPinchState.distance/d,mid=(patternPinchState.range[0]+patternPinchState.range[1])/2,half=(patternPinchState.range[1]-patternPinchState.range[0])*scale/2;Plotly.relayout(chart,{"xaxis.range":[new Date(mid-half),new Date(mid+half)]});updatePatternDateTicks();schedulePatternAutoscale();},{passive:false});
+  chart.addEventListener("touchend",e=>{if(e.touches.length<2)patternPinchState=null;},{passive:true});
+}
+function renderPattern(){
+  if(!historyPayload)return;
+  const code=$("patternTicker").value,info=historyPayload.tickers?.[code];
+  if(!info?.bars?.length){$("patternStatus").textContent=code+" 尚無歷史資料。";return;}
+  patternBars=info.bars;
+  patternLastResult=pScanPatterns(patternBars,$("patternStateMode").value);
+  const result=patternLastResult,x=patternBars.map(b=>b.date),maNs=[5,10,20,60,120,240],maAll=Object.fromEntries(maNs.map(n=>[n,calcMA(patternBars,n)]));
+  const isMobile=window.innerWidth<=820,chartMargin=isMobile?{l:0,r:0,t:16,b:30}:{l:52,r:56,t:30,b:42};
+  const start=result.primary?Math.max(0,result.primary.window.startI-10):Math.max(0,patternBars.length-180);
+  const traces=[
+    {type:"candlestick",name:"K線",x,open:patternBars.map(b=>b.open),high:patternBars.map(b=>b.high),low:patternBars.map(b=>b.low),close:patternBars.map(b=>b.close),increasing:{line:{color:"#d92d20"},fillcolor:"#d92d20"},decreasing:{line:{color:"#07883f"},fillcolor:"#07883f"},yaxis:"y"},
+    {type:"bar",name:"成交量",x,y:patternBars.map(b=>b.volume),yaxis:"y2",marker:{color:patternBars.map(b=>b.close>=b.open?"rgba(217,45,32,.55)":"rgba(7,136,63,.55)")},hovertemplate:"%{x|%-m/%-d}<br>成交量 %{y:,}<extra></extra>"},
+    ...maNs.map(n=>({type:"scatter",mode:"lines",name:"MA"+n,x,y:maAll[n],visible:"legendonly",connectgaps:false,yaxis:"y",line:{width:n===10?2.2:1.25},hovertemplate:"%{x|%-m/%-d}<br>MA"+n+" %{y:.2f}<extra></extra>"}))
+  ];
+  let shapes=[],annotations=[];
+  if(result.primary){
+    const p=pOverlay(result.primary,patternBars,false);shapes.push(...p.shapes);annotations.push(...p.annotations);traces.push(...p.traces);
+    if(result.secondary){const s=pOverlay(result.secondary,patternBars,true);shapes.push(...s.shapes);annotations.push(...s.annotations);traces.push(...s.traces);}
+  }
+  const layout={margin:chartMargin,paper_bgcolor:"#fff",plot_bgcolor:"#fff",hovermode:"x unified",dragmode:"pan",showlegend:true,legend:{orientation:"h",y:1.04,x:0},
+    xaxis:{type:"date",domain:[0,1],rangeslider:{visible:false},showgrid:true,gridcolor:"#eef0f3",rangebreaks:[{bounds:["sat","mon"]}],range:[patternBars[start].date,patternBars[patternBars.length-1].date],tickformat:"%-m/%-d",hoverformat:"%Y/%-m/%-d",automargin:!isMobile,tickangle:0},
+    yaxis:{domain:[0.27,1],side:"right",showgrid:true,gridcolor:"#eef0f3",fixedrange:false,automargin:!isMobile,ticklabelposition:isMobile?"inside":"outside",ticks:""},
+    yaxis2:{domain:[0,0.20],side:"right",showgrid:true,gridcolor:"#f3f4f6",fixedrange:false,automargin:!isMobile,ticklabelposition:isMobile?"inside":"outside",ticks:""},
+    shapes,annotations,uirevision:code+"-"+$("patternStateMode").value};
+  const config={responsive:true,displaylogo:false,displayModeBar:!isMobile,scrollZoom:true,editable:false,modeBarButtonsToRemove:["lasso2d","select2d","drawline","drawopenpath","drawrect","eraseshape"]};
+  const chart=$("patternChart"),p=patternInitialized?Plotly.react(chart,traces,layout,config):Plotly.newPlot(chart,traces,layout,config);
+  Promise.resolve(p).then(()=>{patternInitialized=true;if(!patternListenerBound){chart.on("plotly_relayout",ev=>{if(patternAutoScaling)return;const keys=Object.keys(ev||{});if(keys.some(k=>k.startsWith("xaxis.range")||k==="xaxis.autorange")){updatePatternDateTicks();schedulePatternAutoscale();}});patternListenerBound=true;}bindPatternPinch();setTimeout(()=>{Plotly.Plots.resize(chart);updatePatternDateTicks();schedulePatternAutoscale();},50);});
+  if(result.ambiguous){
+    const a=result.ambiguousPair;$("patternStatus").textContent=info.name+" "+code+"｜型態尚未明確："+a[0].name+" "+a[0].score+" / "+a[1].name+" "+a[1].score+"（分數太接近，不強行判定）";
+  }else if(!result.primary){
+    $("patternStatus").textContent=info.name+" "+code+"｜目前無明確型態";
+  }else{
+    const ptn=result.primary,sec=result.secondary;
+    $("patternStatus").innerHTML='<span class="pattern-badge '+ptn.state+'">主要：'+ptn.name+'｜'+pStateText(ptn.state)+' '+ptn.score+'</span>'+
+      (sec?'<span class="pattern-badge '+sec.state+'">次級：'+sec.name+'｜'+pStateText(sec.state)+' '+sec.score+'</span>':"")+
+      '<span class="pattern-evidence">'+ptn.scale+'｜'+ptn.evidence.slice(0,3).join("；")+'</span>';
+  }
+}
+async function togglePatternFullscreen(){
+  const panel=$("patternPanel"),btn=$("patternFullscreenBtn");
+  if(panel.classList.contains("pattern-fallback-fullscreen")){panel.classList.remove("pattern-fallback-fullscreen");btn.textContent="⛶ 全螢幕橫向";try{screen.orientation?.unlock?.();}catch(e){}}
+  else if(!document.fullscreenElement){try{if(!panel.requestFullscreen)throw new Error("no fullscreen");await panel.requestFullscreen({navigationUI:"hide"});try{if(screen.orientation?.lock)await screen.orientation.lock("landscape");}catch(e){}}catch(e){panel.classList.add("pattern-fallback-fullscreen");btn.textContent="✕ 離開全螢幕";}}
+  else{try{await document.exitFullscreen();}catch(e){}try{screen.orientation?.unlock?.();}catch(e){}}
+  setTimeout(()=>{Plotly.Plots.resize($("patternChart"));updatePatternDateTicks();schedulePatternAutoscale();},180);
+}
+document.addEventListener("fullscreenchange",()=>{const btn=$("patternFullscreenBtn");if(!btn)return;btn.textContent=document.fullscreenElement===$("patternPanel")?"✕ 離開全螢幕":"⛶ 全螢幕橫向";if(patternInitialized)setTimeout(()=>{Plotly.Plots.resize($("patternChart"));updatePatternDateTicks();schedulePatternAutoscale();},120);});
+async function initPatternTab(){
+  try{
+    if(!$("patternTicker").options.length){
+      $("patternTicker").innerHTML=holdings.map(h=>'<option value="'+h.code+'">'+h.code+" "+h.name+"</option>").join("");
+      $("patternTicker").value="4919";
+      $("patternTicker").onchange=()=>renderPattern();
+      $("patternStateMode").onchange=()=>renderPattern();
+      $("patternLoadCodeBtn").onclick=async()=>{try{await loadCustomTicker($("patternCodeInput").value,"pattern");}catch(e){$("patternStatus").textContent="查詢失敗："+e.message;}};
+      $("patternCodeInput").addEventListener("keydown",e=>{if(e.key==="Enter")$("patternLoadCodeBtn").click();});
+      $("patternPanBtn").onclick=()=>Plotly.relayout("patternChart",{dragmode:"pan"});
+      $("patternZoomInBtn").onclick=()=>zoomPattern(0.72);
+      $("patternZoomOutBtn").onclick=()=>zoomPattern(1.38);
+      $("patternResetBtn").onclick=()=>resetPatternZoom();
+      $("patternFullscreenBtn").onclick=()=>togglePatternFullscreen();
+    }
+    $("patternStatus").textContent="型態資料讀取中…";
+    await loadHistory();
+    renderPattern();
+  }catch(e){$("patternStatus").textContent="型態資料讀取失敗："+e.message;}
+}
 
 let fibInitialized=false;
 let fibListenerBound=false;
