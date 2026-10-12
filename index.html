@@ -2669,32 +2669,49 @@ function pReversalState(ctx,p,bull){
 function pDetectABCD(ctx){
   const seq=pHarmonicSequence(ctx,4);if(!seq)return null;
   const [A,B,C,D]=seq;
-  const ab=Math.abs(B.y-A.y),cd=Math.abs(D.y-C.y);
+  if(ctx.endI-D.i>8)return null;
+  const leg1=B.y-A.y,cor=C.y-B.y,leg2=D.y-C.y;
+  if(Math.sign(leg1)!==Math.sign(leg2)||Math.sign(cor)===Math.sign(leg1))return null;
+  const ab=Math.abs(leg1),cd=Math.abs(leg2);
   if(ab<=0||cd<=0)return null;
   const ratio=cd/ab;
   if(ratio<0.85||ratio>1.15)return null;
-  const bc=Math.abs(C.y-B.y)/ab;
-  if(bc<0.25||bc>0.90)return null;
+  const bc=Math.abs(cor)/ab;
+  if(bc<0.382||bc>0.886)return null;
+  const timeRatio=(D.i-C.i)/Math.max(1,B.i-A.i);
+  if(timeRatio<0.50||timeRatio>2.0)return null;
+  // D should extend beyond B in the same direction as AB.
+  if(leg1<0&&D.y>=B.y)return null;
+  if(leg1>0&&D.y<=B.y)return null;
+
   const bull=D.type==="L",rev=pReversalState(ctx,D,bull);
-  if(rev.state==="forming")return null;
-  const quality=ratio>=0.90&&ratio<=1.10?1:0.6;
-  const score=pClamp(76+quality*8+Math.min(8,rev.move*4));
-  const center=D.y,z=pPrzZone(ctx,center,D.i,0.45);
+  if(rev.move<0.60)return null;
+  const quality=ratio>=0.90&&ratio<=1.10?1:0.55;
+  const timeQ=1-Math.min(1,Math.abs(timeRatio-1));
+  const score=pClamp(74+quality*8+timeQ*5+Math.min(8,rev.move*4));
+  const center=D.y,z=pPrzZone(ctx,center,D.i,0.42);
   return pDetection({
     id:47,name:"四點等幅反轉",family:"harmonic_abcd",exclusiveKey:"harmonic",
-    bias:bull?"bullish":"bearish",state:rev.state,score,scale:ctx.label,
+    bias:bull?"bullish":"bearish",state:rev.move>=0.95?"confirmed":"near_confirm",score,scale:ctx.label,
     window:{startI:A.i,endI:ctx.endI},
     anchors:[{...A,role:"甲"},{...B,role:"乙"},{...C,role:"丙"},{...D,role:"丁"}],
     lines:[
       {role:"trend",i0:A.i,y0:A.y,i1:B.i,y1:B.y,source:"pattern_only"},
       {role:"trend",i0:C.i,y0:C.y,i1:D.i,y1:D.y,source:"pattern_only"}
     ],
-    zones:[z],trigger:{type:bull?"close_above":"close_below",price:D.y,confirmedI:rev.state==="confirmed"?D.i:null},
+    zones:[z],trigger:{type:bull?"close_above":"close_below",price:D.y,confirmedI:rev.move>=0.95?D.i:null},
     invalidation:{type:bull?"close_below":"close_above",price:bull?z.low:z.high},
-    evidence:["甲乙為第一腿、乙丙為回撤、丙丁為第二腿","|甲乙| / |丙丁| = "+ratio.toFixed(2),"丁點附近已出現反向位移"],
+    evidence:[
+      "甲乙與丙丁方向一致，乙丙為反向回撤",
+      "|甲乙| / |丙丁| = "+ratio.toFixed(2),
+      "乙丙回撤比例 = "+bc.toFixed(2),
+      "兩段推進時間比例 = "+timeRatio.toFixed(2),
+      "丁點附近已出現反向位移"
+    ],
     warnings:ratio<0.90||ratio>1.10?["等幅比位於寬鬆容忍區 0.85~1.15"]:[]
   });
 }
+
 function pHarmonicRatios(seq){
   const [X,A,B,C,D]=seq,xa=Math.abs(A.y-X.y);
   if(xa<=0)return null;
@@ -2760,28 +2777,35 @@ function pDetectHarmonic(ctx,kind){
 function pDetectThreeDrives(ctx){
   const seq=pHarmonicSequence(ctx,6);if(!seq)return null;
   const [S,D1,R1,D2,R2,D3]=seq;
+  if(ctx.endI-D3.i>8)return null;
   const dir1=D1.y-S.y,dir2=D2.y-R1.y,dir3=D3.y-R2.y;
   if(Math.sign(dir1)!==Math.sign(dir2)||Math.sign(dir2)!==Math.sign(dir3))return null;
   const bull=D3.type==="L";
-  // If the third drive ends low, all three drive legs must point down; inverse for bearish reversal.
   if(bull&&dir1>=0)return null;
   if(!bull&&dir1<=0)return null;
+  if(bull&&!(D2.y<D1.y&&D3.y<D2.y))return null;
+  if(!bull&&!(D2.y>D1.y&&D3.y>D2.y))return null;
+
   const l1=Math.abs(dir1),l2=Math.abs(dir2),l3=Math.abs(dir3);
   const t1=D1.i-S.i,t2=D2.i-R1.i,t3=D3.i-R2.i;
   if(Math.min(l1,l2,l3)<=0||Math.min(t1,t2,t3)<2)return null;
   const r21=l2/l1,r32=l3/l2;
-  const priceSym=Math.min(pNearestRatioScore(r21,[1.13,1.27,1.618],0.45),pNearestRatioScore(r32,[1.13,1.27,1.618],0.45));
+  const q21=pNearestRatioScore(r21,[1.13,1.27,1.618],0.32);
+  const q32=pNearestRatioScore(r32,[1.13,1.27,1.618],0.32);
+  const priceSym=Math.min(q21,q32);
   const timeMax=Math.max(t1,t2,t3),timeMin=Math.min(t1,t2,t3),timeSym=timeMin/timeMax;
-  if(priceSym<0.28||timeSym<0.45)return null;
+  if(priceSym<0.45||timeSym<0.58)return null;
+
   const ret1=Math.abs(R1.y-D1.y)/l1,ret2=Math.abs(R2.y-D2.y)/l2;
-  if(ret1<0.20||ret1>0.85||ret2<0.20||ret2>0.85)return null;
+  if(ret1<0.30||ret1>0.80||ret2<0.30||ret2>0.80)return null;
   const rev=pReversalState(ctx,D3,bull);
-  if(rev.state==="forming")return null;
-  const score=pClamp(76+priceSym*9+timeSym*6+Math.min(7,rev.move*3));
-  const z=pPrzZone(ctx,D3.y,D3.i,0.60);
+  if(rev.move<0.65)return null;
+  const state=rev.move>=1.0?"confirmed":"near_confirm";
+  const score=pClamp(74+priceSym*10+timeSym*7+Math.min(8,rev.move*3));
+  const z=pPrzZone(ctx,D3.y,D3.i,0.50);
   return pDetection({
     id:52,name:"三驅動反轉",family:"three_drives",exclusiveKey:"harmonic",
-    bias:bull?"bullish":"bearish",state:rev.state,score,scale:ctx.label,
+    bias:bull?"bullish":"bearish",state,score,scale:ctx.label,
     window:{startI:S.i,endI:ctx.endI},
     anchors:[
       {...D1,role:"第一驅動"},{...R1,role:"第一次回撤"},
@@ -2793,12 +2817,13 @@ function pDetectThreeDrives(ctx){
       {role:"trend",i0:R2.i,y0:R2.y,i1:D3.i,y1:D3.y,source:"pattern_only"}
     ],
     zones:[z],
-    trigger:{type:bull?"close_above":"close_below",price:D3.y,confirmedI:rev.state==="confirmed"?D3.i:null},
+    trigger:{type:bull?"close_above":"close_below",price:D3.y,confirmedI:state==="confirmed"?D3.i:null},
     invalidation:{type:bull?"close_below":"close_above",price:bull?z.low:z.high},
     evidence:[
-      "三次同方向驅動與兩次回撤完整",
+      "三次同方向驅動且每次創出新極值",
+      "兩次回撤位於合理區間",
       "驅動比例接近 1.13 / 1.27 / 1.618 延伸族群",
-      "三段時間具一定對稱性","第三驅動進入 PRZ 後反向"
+      "三段時間具對稱性","第三驅動進入 PRZ 後反向"
     ],
     warnings:[]
   });
