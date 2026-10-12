@@ -1625,7 +1625,7 @@ function pDetection(o){
     id:o.id,name:o.name,family:o.family,bias:o.bias||"neutral",state:o.state||"forming",
     score:pClamp(Math.round(o.score||0)),window:o.window,anchors:o.anchors||[],
     lines:o.lines||[],trigger:o.trigger||null,invalidation:o.invalidation||null,
-    target:o.target||null,evidence:o.evidence||[],warnings:o.warnings||[],
+    target:o.target||null,zones:o.zones||[],evidence:o.evidence||[],warnings:o.warnings||[],
     exclusiveKey:o.exclusiveKey||o.family,scale:o.scale||""
   };
 }
@@ -2627,6 +2627,172 @@ function pDetectWolfe(ctx,bull){
   });
 }
 
+
+// ---------------- Phase 6: patterns 47~52 ----------------
+function pNearestRatioScore(v,targets,tol=0.18){
+  let best=Infinity;
+  for(const t of targets)best=Math.min(best,Math.abs(v-t));
+  return pClamp(1-best/Math.max(tol,0.001),0,1);
+}
+function pHarmonicSequence(ctx,n){
+  if(ctx.pivots.length<n)return null;
+  // Prefer a recently completed structure; D / third drive must not be ancient.
+  for(let end=ctx.pivots.length-1;end>=n-1;end--){
+    const seq=ctx.pivots.slice(end-n+1,end+1);
+    if(ctx.endI-seq[seq.length-1].i>12)continue;
+    let alt=true;for(let i=1;i<seq.length;i++)if(seq[i].type===seq[i-1].type)alt=false;
+    if(alt)return seq;
+  }
+  return null;
+}
+function pPrzZone(ctx,center,i,scale=0.55){
+  const a=atrAt(ctx.atr,i,ctx.bars),pad=Math.max(a*scale,Math.abs(center)*0.008);
+  return {low:center-pad,high:center+pad,i0:Math.max(ctx.startI,i-4),i1:Math.min(ctx.endI,i+8),role:"PRZ"};
+}
+function pReversalState(ctx,p,bull){
+  const move=pPostMove(ctx,p,bull?"up":"down",6);
+  if(move>=0.9)return {state:"confirmed",move};
+  if(move>=0.45||ctx.endI-p.i<=2)return {state:"near_confirm",move};
+  return {state:"forming",move};
+}
+function pDetectABCD(ctx){
+  const seq=pHarmonicSequence(ctx,4);if(!seq)return null;
+  const [A,B,C,D]=seq;
+  const ab=Math.abs(B.y-A.y),cd=Math.abs(D.y-C.y);
+  if(ab<=0||cd<=0)return null;
+  const ratio=cd/ab;
+  if(ratio<0.85||ratio>1.15)return null;
+  const bc=Math.abs(C.y-B.y)/ab;
+  if(bc<0.25||bc>0.90)return null;
+  const bull=D.type==="L",rev=pReversalState(ctx,D,bull);
+  if(rev.state==="forming")return null;
+  const quality=ratio>=0.90&&ratio<=1.10?1:0.6;
+  const score=pClamp(76+quality*8+Math.min(8,rev.move*4));
+  const center=D.y,z=pPrzZone(ctx,center,D.i,0.45);
+  return pDetection({
+    id:47,name:"四點等幅反轉",family:"harmonic_abcd",exclusiveKey:"harmonic",
+    bias:bull?"bullish":"bearish",state:rev.state,score,scale:ctx.label,
+    window:{startI:A.i,endI:ctx.endI},
+    anchors:[{...A,role:"甲"},{...B,role:"乙"},{...C,role:"丙"},{...D,role:"丁"}],
+    lines:[
+      {role:"trend",i0:A.i,y0:A.y,i1:B.i,y1:B.y,source:"pattern_only"},
+      {role:"trend",i0:C.i,y0:C.y,i1:D.i,y1:D.y,source:"pattern_only"}
+    ],
+    zones:[z],trigger:{type:bull?"close_above":"close_below",price:D.y,confirmedI:rev.state==="confirmed"?D.i:null},
+    invalidation:{type:bull?"close_below":"close_above",price:bull?z.low:z.high},
+    evidence:["甲乙為第一腿、乙丙為回撤、丙丁為第二腿","|甲乙| / |丙丁| = "+ratio.toFixed(2),"丁點附近已出現反向位移"],
+    warnings:ratio<0.90||ratio>1.10?["等幅比位於寬鬆容忍區 0.85~1.15"]:[]
+  });
+}
+function pHarmonicRatios(seq){
+  const [X,A,B,C,D]=seq,xa=Math.abs(A.y-X.y);
+  if(xa<=0)return null;
+  const ab=Math.abs(A.y-B.y)/xa;
+  const ad=Math.abs(A.y-D.y)/xa;
+  const bc=Math.abs(C.y-B.y)/Math.max(Math.abs(A.y-B.y),0.01);
+  const cd=Math.abs(D.y-C.y)/Math.max(Math.abs(C.y-B.y),0.01);
+  return {X,A,B,C,D,xa,ab,ad,bc,cd};
+}
+function pDetectHarmonic(ctx,kind){
+  const seq=pHarmonicSequence(ctx,5);if(!seq)return null;
+  const r=pHarmonicRatios(seq);if(!r)return null;
+  const {X,A,B,C,D,xa,ab,ad,bc,cd}=r;
+  if(bc<0.25||bc>1.0)return null;
+  const bull=D.type==="L",rev=pReversalState(ctx,D,bull);
+  let id,name,abLo,abHi,dLo,dHi,dTarget;
+  if(kind==="gartley"){id=48;name="加特利型態";abLo=0.55;abHi=0.68;dLo=0.74;dHi=0.82;dTarget=0.786;}
+  else if(kind==="bat"){id=49;name="蝙蝠型態";abLo=0.382;abHi=0.50;dLo=0.84;dHi=0.93;dTarget=0.886;}
+  else if(kind==="butterfly"){id=50;name="蝴蝶型態";abLo=0.74;abHi=0.82;dLo=1.20;dHi=1.35;dTarget=1.27;}
+  else {id=51;name="螃蟹型態";abLo=0.382;abHi=0.618;dLo=1.50;dHi=1.72;dTarget=1.618;}
+  if(ab<abLo||ab>abHi||ad<dLo||ad>dHi)return null;
+
+  // Gartley/Bat D must stay inside X; Butterfly/Crab D must extend beyond X.
+  const xToA=A.y-X.y;
+  const expected=A.y-dTarget*xToA;
+  const beyondX=bull?D.y<X.y:D.y>X.y;
+  if((kind==="gartley"||kind==="bat")&&beyondX)return null;
+  if((kind==="butterfly"||kind==="crab")&&!beyondX)return null;
+
+  const abMid=(abLo+abHi)/2,dMid=(dLo+dHi)/2;
+  const ratioQ=(1-Math.abs(ab-abMid)/Math.max((abHi-abLo)/2,0.01))*0.40+
+               (1-Math.abs(ad-dMid)/Math.max((dHi-dLo)/2,0.01))*0.45+
+               pClamp(1-Math.abs(bc-0.618)/0.45,0,1)*0.15;
+  const z=pPrzZone(ctx,expected,D.i,0.65);
+  const inPrz=D.y>=z.low&&D.y<=z.high;
+  if(!inPrz)return null;
+  const state=rev.state;
+  if(state==="forming"&&ctx.endI-D.i>1)return null;
+  const score=pClamp(73+pClamp(ratioQ,0,1)*14+(state==="confirmed"?8:state==="near_confirm"?4:0));
+  return pDetection({
+    id,name,family:"harmonic",exclusiveKey:"harmonic",bias:bull?"bullish":"bearish",state,score,scale:ctx.label,
+    window:{startI:X.i,endI:ctx.endI},
+    anchors:[{...X,role:"起"},{...A,role:"甲"},{...B,role:"乙"},{...C,role:"丙"},{...D,role:"丁"}],
+    lines:[
+      {role:"trend",i0:X.i,y0:X.y,i1:A.i,y1:A.y,source:"pattern_only"},
+      {role:"trend",i0:A.i,y0:A.y,i1:B.i,y1:B.y,source:"pattern_only"},
+      {role:"trend",i0:B.i,y0:B.y,i1:C.i,y1:C.y,source:"pattern_only"},
+      {role:"trend",i0:C.i,y0:C.y,i1:D.i,y1:D.y,source:"pattern_only"},
+      pHLine("target",expected,Math.max(X.i,D.i-5),Math.min(ctx.endI,D.i+8))
+    ],
+    zones:[z],
+    trigger:{type:bull?"close_above":"close_below",price:D.y,confirmedI:state==="confirmed"?D.i:null},
+    invalidation:{type:bull?"close_below":"close_above",price:bull?z.low:z.high},
+    evidence:[
+      "先確認五個交替 pivot，再檢查費波比例",
+      "乙 / 起甲回撤 = "+ab.toFixed(3),
+      "丁 / 起甲比例 = "+ad.toFixed(3),
+      "丁點落入 PRZ"
+    ],
+    warnings:state==="forming"?["丁點尚未出現足夠反向確認"]:[]
+  });
+}
+function pDetectThreeDrives(ctx){
+  const seq=pHarmonicSequence(ctx,6);if(!seq)return null;
+  const [S,D1,R1,D2,R2,D3]=seq;
+  const dir1=D1.y-S.y,dir2=D2.y-R1.y,dir3=D3.y-R2.y;
+  if(Math.sign(dir1)!==Math.sign(dir2)||Math.sign(dir2)!==Math.sign(dir3))return null;
+  const bull=D3.type==="L";
+  // If the third drive ends low, all three drive legs must point down; inverse for bearish reversal.
+  if(bull&&dir1>=0)return null;
+  if(!bull&&dir1<=0)return null;
+  const l1=Math.abs(dir1),l2=Math.abs(dir2),l3=Math.abs(dir3);
+  const t1=D1.i-S.i,t2=D2.i-R1.i,t3=D3.i-R2.i;
+  if(Math.min(l1,l2,l3)<=0||Math.min(t1,t2,t3)<2)return null;
+  const r21=l2/l1,r32=l3/l2;
+  const priceSym=Math.min(pNearestRatioScore(r21,[1.13,1.27,1.618],0.45),pNearestRatioScore(r32,[1.13,1.27,1.618],0.45));
+  const timeMax=Math.max(t1,t2,t3),timeMin=Math.min(t1,t2,t3),timeSym=timeMin/timeMax;
+  if(priceSym<0.28||timeSym<0.45)return null;
+  const ret1=Math.abs(R1.y-D1.y)/l1,ret2=Math.abs(R2.y-D2.y)/l2;
+  if(ret1<0.20||ret1>0.85||ret2<0.20||ret2>0.85)return null;
+  const rev=pReversalState(ctx,D3,bull);
+  if(rev.state==="forming")return null;
+  const score=pClamp(76+priceSym*9+timeSym*6+Math.min(7,rev.move*3));
+  const z=pPrzZone(ctx,D3.y,D3.i,0.60);
+  return pDetection({
+    id:52,name:"三驅動反轉",family:"three_drives",exclusiveKey:"harmonic",
+    bias:bull?"bullish":"bearish",state:rev.state,score,scale:ctx.label,
+    window:{startI:S.i,endI:ctx.endI},
+    anchors:[
+      {...D1,role:"第一驅動"},{...R1,role:"第一次回撤"},
+      {...D2,role:"第二驅動"},{...R2,role:"第二次回撤"},{...D3,role:"第三驅動"}
+    ],
+    lines:[
+      {role:"trend",i0:S.i,y0:S.y,i1:D1.i,y1:D1.y,source:"pattern_only"},
+      {role:"trend",i0:R1.i,y0:R1.y,i1:D2.i,y1:D2.y,source:"pattern_only"},
+      {role:"trend",i0:R2.i,y0:R2.y,i1:D3.i,y1:D3.y,source:"pattern_only"}
+    ],
+    zones:[z],
+    trigger:{type:bull?"close_above":"close_below",price:D3.y,confirmedI:rev.state==="confirmed"?D3.i:null},
+    invalidation:{type:bull?"close_below":"close_above",price:bull?z.low:z.high},
+    evidence:[
+      "三次同方向驅動與兩次回撤完整",
+      "驅動比例接近 1.13 / 1.27 / 1.618 延伸族群",
+      "三段時間具一定對稱性","第三驅動進入 PRZ 後反向"
+    ],
+    warnings:[]
+  });
+}
+
 function pScanPatterns(bars,mode="all"){
   if(!bars||bars.length<25) return {detections:[],primary:null,secondary:null,ambiguous:false};
   const base=pBase(bars),last=base.lastI;
@@ -2669,7 +2835,13 @@ function pScanPatterns(bars,mode="all"){
         pDetectSFP(ctx,true),pDetectSFP(ctx,false),
         pDetectQuasimodo(ctx,true),pDetectQuasimodo(ctx,false)
       ]:[]),
-      ...(w.label!=="短期"?[pDetectWolfe(ctx,true),pDetectWolfe(ctx,false)]:[])
+      ...(w.label!=="短期"?[
+        pDetectWolfe(ctx,true),pDetectWolfe(ctx,false),
+        pDetectABCD(ctx),
+        pDetectHarmonic(ctx,"gartley"),pDetectHarmonic(ctx,"bat"),
+        pDetectHarmonic(ctx,"butterfly"),pDetectHarmonic(ctx,"crab"),
+        pDetectThreeDrives(ctx)
+      ]:[])
     ].filter(Boolean);
     detections.push(...ds);
   }
@@ -2688,10 +2860,10 @@ function pScanPatterns(bars,mode="all"){
 
   if(!valid.length) return {detections:[],primary:null,secondary:null,ambiguous:false};
 
-  // Pattern 16 is an event overlay. Prefer a real geometric/structural pattern as the
-  // primary diagnosis whenever one clears the quality gate.
-  const structural=valid.filter(d=>d.family!=="trend_break");
-  const events=valid.filter(d=>d.family==="trend_break");
+  // Event/method patterns are useful context but should not erase the underlying structure.
+  const eventFamilies=new Set(["trend_break","gap","false_break","measured_move","acceleration_reversal"]);
+  const structural=valid.filter(d=>!eventFamilies.has(d.family));
+  const events=valid.filter(d=>eventFamilies.has(d.family));
   let first=structural[0]||events[0]||null;
   if(!first) return {detections:[],primary:null,secondary:null,ambiguous:false};
 
@@ -2702,7 +2874,7 @@ function pScanPatterns(bars,mode="all"){
 
   let secondary=valid.find(d=>d!==first&&d.exclusiveKey!==first.exclusiveKey&&d.score>=72)||null;
   // A confirmed trend break is useful context, but should not replace the structure itself.
-  if(first.family!=="trend_break"&&events[0]&&events[0].score>=72) secondary=events[0];
+  if(!eventFamilies.has(first.family)&&events[0]&&events[0].score>=72) secondary=events[0];
 
   return {detections:valid,primary:first,secondary,ambiguous:false};
 }
@@ -2713,6 +2885,7 @@ function pRoleStyle(role,secondary=false){
   if(role==="resistance"||role==="upper") return {color:"rgba(234,88,12,"+alpha+")",dash:"solid"};
   if(role==="neckline") return {color:"rgba(220,38,38,"+alpha+")",dash:"dash"};
   if(role==="trend") return {color:"rgba(147,51,234,"+alpha+")",dash:"solid"};
+  if(role==="target") return {color:"rgba(202,138,4,"+alpha+")",dash:"dot"};
   return {color:"rgba(100,116,139,"+alpha+")",dash:"dash"};
 }
 function pOverlay(d,bars,secondary=false){
@@ -2729,7 +2902,17 @@ function pOverlay(d,bars,secondary=false){
       line:{color:style.color,width:secondary?1.5:2.3,dash:style.dash},layer:"above"});
     ys.push(line.y0,y1);
   }
-  if(d.trigger&&Number.isFinite(Number(d.trigger.price))){
+  for(const z of (d.zones||[])){
+    const i0=Math.max(0,Number.isFinite(z.i0)?z.i0:d.window.startI);
+    const i1=Math.min(bars.length-1,Number.isFinite(z.i1)?z.i1:d.window.endI);
+    if(!Number.isFinite(z.low)||!Number.isFinite(z.high)||!bars[i0]||!bars[i1])continue;
+    shapes.push({type:"rect",xref:"x",yref:"y",x0:bars[i0].date,x1:bars[i1].date,
+      y0:Math.min(z.low,z.high),y1:Math.max(z.low,z.high),
+      fillcolor:secondary?"rgba(245,158,11,.06)":"rgba(245,158,11,.11)",
+      line:{color:"rgba(245,158,11,.65)",width:1,dash:"dot"},layer:"below"});
+    ys.push(Number(z.low),Number(z.high));
+  }
+    if(d.trigger&&Number.isFinite(Number(d.trigger.price))){
     const s=Math.max(d.window.startI,d.window.endI-8);
     shapes.push({type:"line",xref:"x",yref:"y",x0:bars[s].date,y0:d.trigger.price,x1:bars[end].date,y1:d.trigger.price,
       line:{color:d.state==="confirmed"?"#16a34a":"#f59e0b",width:1.6,dash:"dot"},layer:"above"});
