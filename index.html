@@ -2209,6 +2209,232 @@ function pDetectBroadeningWedge(ctx,rising){
   });
 }
 
+
+// ---------------- Phase 4: patterns 31~40 ----------------
+function pGapAt(bars,i){
+  if(i<=0||i>=bars.length)return null;
+  const p=bars[i-1],b=bars[i];
+  const prevHigh=Number(p.high),prevLow=Number(p.low),hi=Number(b.high),lo=Number(b.low);
+  if(lo>prevHigh)return {i,dir:"up",low:prevHigh,high:lo,size:lo-prevHigh};
+  if(hi<prevLow)return {i,dir:"down",low:hi,high:prevLow,size:prevLow-hi};
+  return null;
+}
+function pGapFillInfo(ctx,g,maxBars=6){
+  let fillI=null,maxAgainst=0;
+  for(let i=g.i;i<=Math.min(ctx.endI,g.i+maxBars);i++){
+    const b=ctx.bars[i];
+    if(g.dir==="up"){
+      if(Number(b.low)<=g.low){fillI=i;break;}
+      maxAgainst=Math.max(maxAgainst,g.high-Number(b.low));
+    }else{
+      if(Number(b.high)>=g.high){fillI=i;break;}
+      maxAgainst=Math.max(maxAgainst,Number(b.high)-g.low);
+    }
+  }
+  return {filled:fillI!==null,fillI,maxAgainst};
+}
+function pRecentGaps(ctx,lookback=30){
+  const out=[];
+  for(let i=Math.max(1,ctx.endI-lookback+1);i<=ctx.endI;i++){
+    const g=pGapAt(ctx.bars,i);if(g)out.push(g);
+  }
+  return out;
+}
+function pDetectIsland(ctx,bull){
+  const gaps=pRecentGaps(ctx,35);
+  for(let a=0;a<gaps.length-1;a++){
+    const g1=gaps[a];
+    if(bull&&g1.dir!=="down")continue;
+    if(!bull&&g1.dir!=="up")continue;
+    for(let b=a+1;b<gaps.length;b++){
+      const g2=gaps[b];
+      if(bull&&g2.dir!=="up")continue;
+      if(!bull&&g2.dir!=="down")continue;
+      const islandBars=g2.i-g1.i;
+      if(islandBars<1||islandBars>6)continue;
+      const prior=pPriorTrend(ctx,g1.i,35);
+      if(bull&&prior!=="down")continue;
+      if(!bull&&prior!=="up")continue;
+      const mid=ctx.bars.slice(g1.i,g2.i);
+      const isolated=bull
+        ? Math.max(...mid.map(x=>Number(x.high)))<Math.min(g1.high,g2.low)+atrAt(ctx.atr,g2.i,ctx.bars)*0.25
+        : Math.min(...mid.map(x=>Number(x.low)))>Math.max(g1.low,g2.high)-atrAt(ctx.atr,g2.i,ctx.bars)*0.25;
+      if(!isolated)continue;
+      const zoneLow=Math.min(g1.low,g1.high,g2.low,g2.high),zoneHigh=Math.max(g1.low,g1.high,g2.low,g2.high);
+      return pDetection({
+        id:31,name:"島狀反轉",family:"gap",exclusiveKey:"gap_event",bias:bull?"bullish":"bearish",
+        state:"confirmed",score:pClamp(82+Math.min(10,islandBars*2)+pVolumeScore(ctx,"confirmed")),scale:ctx.label,
+        window:{startI:Math.max(ctx.startI,g1.i-5),endI:ctx.endI},
+        anchors:[{role:"缺口1",i:g1.i,date:ctx.bars[g1.i].date,price:(g1.low+g1.high)/2},{role:"缺口2",i:g2.i,date:ctx.bars[g2.i].date,price:(g2.low+g2.high)/2}],
+        lines:[pHLine("support",zoneLow,g1.i-1,g2.i+2),pHLine("resistance",zoneHigh,g1.i-1,g2.i+2)],
+        trigger:{type:bull?"breakout":"breakdown",price:bull?g2.high:g2.low,confirmedI:g2.i},
+        invalidation:{type:bull?"close_below":"close_above",price:bull?zoneLow:zoneHigh},
+        evidence:["兩個反向缺口形成孤立價格區","孤立區與左右價格範圍實際分離",bull?"前置下降趨勢":"前置上升趨勢"],warnings:[]
+      });
+    }
+  }
+  return null;
+}
+function pDetectCommonGap(ctx){
+  const gaps=pRecentGaps(ctx,12);
+  for(let k=gaps.length-1;k>=0;k--){
+    const g=gaps[k],a=atrAt(ctx.atr,g.i,ctx.bars),fill=pGapFillInfo(ctx,g,5);
+    if(g.size>a*1.25||!fill.filled)continue;
+    const prior=pPriorTrend(ctx,g.i,25);
+    if(prior!=="flat")continue;
+    return pDetection({
+      id:32,name:"普通缺口",family:"gap",exclusiveKey:"gap_event",bias:"neutral",state:"confirmed",
+      score:74,scale:ctx.label,window:{startI:Math.max(ctx.startI,g.i-12),endI:ctx.endI},
+      anchors:[{role:"缺口",i:g.i,date:ctx.bars[g.i].date,price:(g.low+g.high)/2}],
+      lines:[pHLine("support",g.low,g.i-1,Math.min(ctx.endI,g.i+5)),pHLine("resistance",g.high,g.i-1,Math.min(ctx.endI,g.i+5))],
+      trigger:null,invalidation:null,evidence:["盤整背景中的小型缺口","數日內已快速回補","技術意義較低"],warnings:[]
+    });
+  }
+  return null;
+}
+function pDetectBreakawayGap(ctx){
+  const gaps=pRecentGaps(ctx,10);
+  for(let k=gaps.length-1;k>=0;k--){
+    const g=gaps[k],i=g.i,a=atrAt(ctx.atr,i,ctx.bars);
+    if(g.size<a*0.35)continue;
+    const before=ctx.bars.slice(Math.max(ctx.startI,i-25),i);
+    if(before.length<12)continue;
+    const hi=Math.max(...before.map(b=>Number(b.high))),lo=Math.min(...before.map(b=>Number(b.low)));
+    const range=hi-lo,flat=range<=Math.max(a*6,pAvg(before.map(b=>Number(b.close)))*0.16);
+    if(!flat)continue;
+    const escaped=g.dir==="up"?Number(ctx.bars[i].low)>hi-a*0.20:Number(ctx.bars[i].high)<lo+a*0.20;
+    if(!escaped)continue;
+    const fill=pGapFillInfo(ctx,g,5);if(fill.filled)continue;
+    const vol=pVolMA(ctx.bars,i,20),v=Number(ctx.bars[i].volume),volPts=vol&&v>=vol*1.35?8:0;
+    return pDetection({
+      id:33,name:"突破缺口",family:"gap",exclusiveKey:"gap_event",bias:g.dir==="up"?"bullish":"bearish",
+      state:"confirmed",score:pClamp(80+volPts+Math.min(8,g.size/a*3)),scale:ctx.label,
+      window:{startI:Math.max(ctx.startI,i-25),endI:ctx.endI},
+      anchors:[{role:"突破缺口",i,date:ctx.bars[i].date,price:(g.low+g.high)/2}],
+      lines:[pHLine("resistance",hi,Math.max(ctx.startI,i-25),ctx.endI),pHLine("support",lo,Math.max(ctx.startI,i-25),ctx.endI)],
+      trigger:{type:g.dir==="up"?"breakout":"breakdown",price:g.dir==="up"?hi:lo,confirmedI:i},
+      invalidation:{type:g.dir==="up"?"close_below":"close_above",price:g.dir==="up"?g.low:g.high},
+      evidence:["缺口直接脫離前方整理區","2~5 根內未回補大部分缺口",volPts?"缺口伴隨量增":"量能未明顯放大"],warnings:[]
+    });
+  }
+  return null;
+}
+function pDetectContinuationGap(ctx){
+  const gaps=pRecentGaps(ctx,18);
+  for(let k=gaps.length-1;k>=0;k--){
+    const g=gaps[k],i=g.i,prior=pPriorTrend(ctx,i,45),a=atrAt(ctx.atr,i,ctx.bars);
+    if((g.dir==="up"&&prior!=="up")||(g.dir==="down"&&prior!=="down"))continue;
+    if(g.size<a*0.28)continue;
+    const fill=pGapFillInfo(ctx,g,6);if(fill.filled)continue;
+    const age=i-Math.max(ctx.startI,i-45);
+    if(age<12)continue;
+    return pDetection({
+      id:34,name:"持續缺口",family:"gap",exclusiveKey:"gap_event",bias:g.dir==="up"?"bullish":"bearish",
+      state:"confirmed",score:pClamp(78+Math.min(8,g.size/a*3)+pVolumeScore(ctx,"confirmed")),scale:ctx.label,
+      window:{startI:Math.max(ctx.startI,i-45),endI:ctx.endI},
+      anchors:[{role:"持續缺口",i,date:ctx.bars[i].date,price:(g.low+g.high)/2}],
+      lines:[pHLine("support",g.dir==="up"?g.low:g.high,i-1,ctx.endI)],
+      trigger:{type:g.dir==="up"?"breakout":"breakdown",price:g.dir==="up"?g.high:g.low,confirmedI:i},
+      invalidation:{type:g.dir==="up"?"close_below":"close_above",price:g.dir==="up"?g.low:g.high},
+      evidence:["缺口方向與既有趨勢一致","缺口位於趨勢中段","未被快速回補"],warnings:[]
+    });
+  }
+  return null;
+}
+function pDetectExhaustionGap(ctx){
+  const gaps=pRecentGaps(ctx,12);
+  for(let k=gaps.length-1;k>=0;k--){
+    const g=gaps[k],i=g.i,prior=pPriorTrend(ctx,i,60),a=atrAt(ctx.atr,i,ctx.bars);
+    if((g.dir==="up"&&prior!=="up")||(g.dir==="down"&&prior!=="down"))continue;
+    if(g.size<a*0.35)continue;
+    const fill=pGapFillInfo(ctx,g,5);if(!fill.filled)continue;
+    let reverse=0;
+    for(let j=i;j<=Math.min(ctx.endI,i+6);j++){
+      const close=Number(ctx.bars[j].close);
+      reverse=Math.max(reverse,g.dir==="up"?g.low-close:close-g.high);
+    }
+    if(reverse<a*0.8)continue;
+    const accelStart=Math.max(ctx.startI,i-12),first=Number(ctx.bars[accelStart].close),last=Number(ctx.bars[i-1].close);
+    const accel=Math.abs(last-first)/Math.max(a,0.01);
+    if(accel<2.5)continue;
+    return pDetection({
+      id:35,name:"竭盡缺口",family:"gap",exclusiveKey:"gap_event",bias:g.dir==="up"?"bearish":"bullish",
+      state:"confirmed",score:pClamp(82+Math.min(8,reverse/a*3)+pVolumeScore(ctx,"confirmed")),scale:ctx.label,
+      window:{startI:Math.max(ctx.startI,i-45),endI:ctx.endI},
+      anchors:[{role:"竭盡缺口",i,date:ctx.bars[i].date,price:(g.low+g.high)/2}],
+      lines:[pHLine("trend",g.dir==="up"?g.low:g.high,i-1,ctx.endI)],
+      trigger:{type:g.dir==="up"?"close_below":"close_above",price:g.dir==="up"?g.low:g.high,confirmedI:fill.fillI},
+      invalidation:null,evidence:["長趨勢末端再出現同方向缺口","缺口後無法延續","數日內回補並反向位移"],warnings:[]
+    });
+  }
+  return null;
+}
+function pDetect123(ctx,bottom){
+  const seq=pFindLastSequence(ctx,bottom?["L","H","L"]:["H","L","H"]);if(!seq)return null;
+  const [p1,p2,p3]=seq,a=atrAt(ctx.atr,p3.i,ctx.bars),prior=pPriorTrend(ctx,p1.i,35);
+  if(bottom&&prior!=="down")return null;if(!bottom&&prior!=="up")return null;
+  if(bottom){
+    if(p3.y<=p1.y+a*0.35)return null;
+  }else{
+    if(p3.y>=p1.y-a*0.35)return null;
+  }
+  const trigger=p2.y,dir=bottom?"up":"down",st=pDirectionalState(ctx,dir,trigger);
+  const score=pCommonScore(30,18,15,st.state,pVolumeScore(ctx,st.state),0);
+  return pDetection({
+    id:bottom?36:37,name:bottom?"一二三底":"一二三頂",family:"one_two_three",
+    exclusiveKey:bottom?"bottom_reversal":"top_reversal",bias:bottom?"bullish":"bearish",state:st.state,score,scale:ctx.label,
+    window:{startI:p1.i,endI:ctx.endI},anchors:[{...p1,role:"1"},{...p2,role:"2"},{...p3,role:"3"}],
+    lines:[pHLine("neckline",trigger,p1.i,ctx.endI)],
+    trigger:{type:bottom?"close_above":"close_below",price:trigger,confirmedI:st.confirmedI},
+    invalidation:{type:bottom?"close_below":"close_above",price:p1.y},
+    evidence:[bottom?"點 3 為 higher low":"點 3 為 lower high",bottom?"原下降結構開始轉換":"原上升結構開始轉換","突破點 2 才確認"],warnings:[]
+  });
+}
+function pDetectPullbackContinuation(ctx,bull){
+  const seq=pFindLastSequence(ctx,bull?["L","H","L"]:["H","L","H"]);if(!seq)return null;
+  const [a,b,c]=seq,prior=pPriorTrend(ctx,a.i,40),atr=atrAt(ctx.atr,c.i,ctx.bars);
+  if(bull&&prior!=="up")return null;if(!bull&&prior!=="down")return null;
+  if(bull&&c.y<=a.y+atr*0.25)return null;
+  if(!bull&&c.y>=a.y-atr*0.25)return null;
+  const trigger=b.y,dir=bull?"up":"down",st=pDirectionalState(ctx,dir,trigger);
+  const score=pCommonScore(29,17,15,st.state,pVolumeScore(ctx,st.state),0);
+  return pDetection({
+    id:bull?38:39,name:bull?"多頭折返上漲":"空頭折返下跌",family:"pullback_continuation",
+    exclusiveKey:bull?"bull_continuation":"bear_continuation",bias:bull?"bullish":"bearish",state:st.state,score,scale:ctx.label,
+    window:{startI:a.i,endI:ctx.endI},anchors:[{...a,role:"第一段起點"},{...b,role:"前高／前低"},{...c,role:"回檔點"}],
+    lines:[pHLine(bull?"resistance":"support",trigger,a.i,ctx.endI)],
+    trigger:{type:bull?"close_above":"close_below",price:trigger,confirmedI:st.confirmedI},
+    invalidation:{type:bull?"close_below":"close_above",price:c.y},
+    evidence:[bull?"原本即為上升背景":"原本即為下降背景",bull?"回檔形成 higher low":"反彈形成 lower high",bull?"再突破前高延續":"再跌破前低延續"],warnings:[]
+  });
+}
+function pDetectMeasuredMove(ctx){
+  const seq=pPivotSeq(ctx,3);if(!seq)return null;
+  const [a,b,c]=seq;
+  const first=b.y-a.y;if(Math.abs(first)<atrAt(ctx.atr,b.i,ctx.bars)*3)return null;
+  const correction=Math.abs(c.y-b.y)/Math.max(Math.abs(first),0.01);
+  if(correction<0.18||correction>0.72)return null;
+  if(first>0&&c.y<=a.y)return null;
+  if(first<0&&c.y>=a.y)return null;
+  const target=c.y+first,dir=first>0?"up":"down",current=Number(ctx.bars[ctx.endI].close);
+  const aNow=atrAt(ctx.atr,ctx.endI,ctx.bars),remaining=dir==="up"?target-current:current-target;
+  const state=Math.abs(remaining)<=aNow*0.6?"near_confirm":((dir==="up"&&current>=target)||(dir==="down"&&current<=target))?"confirmed":"forming";
+  const symmetry=Math.max(0,1-Math.abs(correction-0.5));
+  const score=pClamp(72+symmetry*8+(state==="confirmed"?8:state==="near_confirm"?5:0));
+  return pDetection({
+    id:40,name:"等幅測距",family:"measured_move",exclusiveKey:"target_method",bias:dir==="up"?"bullish":"bearish",
+    state,score,scale:ctx.label,window:{startI:a.i,endI:ctx.endI},
+    anchors:[{...a,role:"A"},{...b,role:"B"},{...c,role:"C"}],
+    lines:[
+      {role:"trend",i0:a.i,y0:a.y,i1:b.i,y1:b.y,source:"pattern_only"},
+      pHLine("target",target,c.i,ctx.endI)
+    ],
+    trigger:null,invalidation:null,target:{price:target,method:"measured_move"},
+    evidence:["第一段推進幅度清楚","中間已有可辨識修正","以第一段幅度自 C 點投影第二段目標"],
+    warnings:["目標為估算，不代表一定到達"]
+  });
+}
+
 function pScanPatterns(bars,mode="all"){
   if(!bars||bars.length<25) return {detections:[],primary:null,secondary:null,ambiguous:false};
   const base=pBase(bars),last=base.lastI;
@@ -2236,7 +2462,15 @@ function pScanPatterns(bars,mode="all"){
         pDetectDiamond(ctx,true),pDetectDiamond(ctx,false)
       ]:[]),
       pDetectBroadening(ctx,false),pDetectBroadening(ctx,true),
-      pDetectBroadeningWedge(ctx,true),pDetectBroadeningWedge(ctx,false)
+      pDetectBroadeningWedge(ctx,true),pDetectBroadeningWedge(ctx,false),
+      ...(w.label!=="長期"?[
+        pDetectIsland(ctx,true),pDetectIsland(ctx,false),
+        pDetectCommonGap(ctx),pDetectBreakawayGap(ctx),
+        pDetectContinuationGap(ctx),pDetectExhaustionGap(ctx)
+      ]:[]),
+      pDetect123(ctx,true),pDetect123(ctx,false),
+      pDetectPullbackContinuation(ctx,true),pDetectPullbackContinuation(ctx,false),
+      ...(w.label!=="短期"?[pDetectMeasuredMove(ctx)]:[])
     ].filter(Boolean);
     detections.push(...ds);
   }
