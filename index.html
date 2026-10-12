@@ -1870,27 +1870,71 @@ function pDetectHeadShoulders(ctx,inverse){
     evidence:["左肩、頭、右肩結構完整","頭部相較兩肩明顯突出","頸線由兩個反應點形成"],warnings:[]});
 }
 
-// 16 Trendline breakout/breakdown: re-use the already qualified Pstock trendline engine.
+// 16 Trendline breakout/breakdown.
+// This is an EVENT pattern, not a generic "price is near a trendline" condition.
+// It is emitted only after a real close-through event and must remain valid afterward.
 function pDetectTrendBreak(base,bull){
   const last=base.lastI;
-  for(let cut=2;cut<=6;cut++){
-    const prefix=base.bars.slice(0,last-cut+1);
+
+  // Look for a genuine break in the most recent 3 bars.
+  for(let eventI=last;eventI>=Math.max(2,last-2);eventI--){
+    // Build the trendline only from data that existed BEFORE the event.
+    const prefixEnd=eventI-1;
+    const prefix=base.bars.slice(0,prefixEnd+1);
     if(prefix.length<25) continue;
+
     const prior=autoTrendLines(prefix);
     const t=bull?prior.trendDetails?.down:prior.trendDetails?.up;
     if(!t) continue;
-    const y=projectedY(t,last),a=atrAt(base.atr,last,base.bars),close=Number(base.bars[last].close);
-    const prev=Number(base.bars[last-1].close);
-    const crossed=bull?(close>y+a*0.15&&prev<=projectedY(t,last-1)+a*0.20):(close<y-a*0.15&&prev>=projectedY(t,last-1)-a*0.20);
-    const near=Math.abs(close-y)<=a*0.60;
-    if(!crossed&&!near) continue;
-    const state=crossed?"confirmed":"near_confirm";
-    const score=pClamp(70+(crossed?15:10)+Math.min(10,(t.confirmations||0)*3)+pVolumeScore(base,state));
-    return pDetection({id:16,name:bull?"下降趨勢線突破":"上升趨勢線跌破",family:"trend_break",exclusiveKey:"trend_break",bias:bull?"bullish":"bearish",state,score,scale:"近期",
-      window:{startI:t.p1.i,endI:last},anchors:[{...t.p1,role:"A"},{...t.p2,role:"B"}],
-      lines:[{role:"trend",i0:t.p1.i,y0:t.p1.y,i1:last,y1:y,source:"existing_trend"}],
-      trigger:{type:bull?"close_above":"close_below",price:y,confirmedI:crossed?last:null},
-      invalidation:null,evidence:["直接沿用切線分析已認可趨勢線",crossed?"收盤已有效穿越":"價格已接近趨勢線"],warnings:[]});
+
+    const a=atrAt(base.atr,eventI,base.bars);
+    const yEvent=projectedY(t,eventI);
+    const yPrev=projectedY(t,eventI-1);
+    const close=Number(base.bars[eventI].close);
+    const prev=Number(base.bars[eventI-1].close);
+
+    const crossed=bull
+      ? (prev<=yPrev+a*0.10 && close>yEvent+a*0.12)
+      : (prev>=yPrev-a*0.10 && close<yEvent-a*0.12);
+    if(!crossed) continue;
+
+    // The breakout/breakdown must still be holding now; otherwise it is a failed break,
+    // which belongs to the later false-break family, not pattern 16.
+    let held=true;
+    for(let i=eventI;i<=last;i++){
+      const yy=projectedY(t,i),aa=atrAt(base.atr,i,base.bars),cc=Number(base.bars[i].close);
+      if(bull && cc<yy-aa*0.18) held=false;
+      if(!bull && cc>yy+aa*0.18) held=false;
+    }
+    if(!held) continue;
+
+    const yNow=projectedY(t,last);
+    const vol=pVolumeScore(base,"confirmed");
+    const freshness=eventI===last?8:eventI===last-1?5:3;
+    const confirmations=Math.min(9,(t.confirmations||0)*3);
+    const score=pClamp(72+freshness+confirmations+vol);
+
+    return pDetection({
+      id:16,
+      name:bull?"下降趨勢線突破":"上升趨勢線跌破",
+      family:"trend_break",
+      exclusiveKey:"trend_break",
+      bias:bull?"bullish":"bearish",
+      state:"confirmed",
+      score,
+      scale:"近期事件",
+      window:{startI:t.p1.i,endI:last},
+      anchors:[{...t.p1,role:"A"},{...t.p2,role:"B"}],
+      lines:[{role:"trend",i0:t.p1.i,y0:t.p1.y,i1:last,y1:yNow,source:"existing_trend"}],
+      trigger:{type:bull?"close_above":"close_below",price:yEvent,confirmedI:eventI},
+      invalidation:{type:bull?"close_below":"close_above",price:yNow},
+      evidence:[
+        "直接沿用切線分析已認可趨勢線",
+        "最近 "+(last-eventI)+"～"+(last-eventI)+" 日內出現收盤有效穿越",
+        "突破後目前仍守在有效側"
+      ],
+      warnings:[]
+    });
   }
   return null;
 }
@@ -1931,11 +1975,23 @@ function pScanPatterns(bars,mode="all"){
   valid=[...byId.values()].sort((a,b)=>b.score-a.score);
 
   if(!valid.length) return {detections:[],primary:null,secondary:null,ambiguous:false};
-  const first=valid[0],second=valid[1];
-  if(second&&first.exclusiveKey===second.exclusiveKey&&Math.abs(first.score-second.score)<6){
-    return {detections:valid,primary:null,secondary:null,ambiguous:true,ambiguousPair:[first,second]};
+
+  // Pattern 16 is an event overlay. Prefer a real geometric/structural pattern as the
+  // primary diagnosis whenever one clears the quality gate.
+  const structural=valid.filter(d=>d.family!=="trend_break");
+  const events=valid.filter(d=>d.family==="trend_break");
+  let first=structural[0]||events[0]||null;
+  if(!first) return {detections:[],primary:null,secondary:null,ambiguous:false};
+
+  const structuralSecond=structural.find(d=>d!==first);
+  if(structuralSecond&&first.exclusiveKey===structuralSecond.exclusiveKey&&Math.abs(first.score-structuralSecond.score)<6){
+    return {detections:valid,primary:null,secondary:null,ambiguous:true,ambiguousPair:[first,structuralSecond]};
   }
-  const secondary=valid.find(d=>d!==first&&d.exclusiveKey!==first.exclusiveKey&&d.score>=72)||null;
+
+  let secondary=valid.find(d=>d!==first&&d.exclusiveKey!==first.exclusiveKey&&d.score>=72)||null;
+  // A confirmed trend break is useful context, but should not replace the structure itself.
+  if(first.family!=="trend_break"&&events[0]&&events[0].score>=72) secondary=events[0];
+
   return {detections:valid,primary:first,secondary,ambiguous:false};
 }
 
