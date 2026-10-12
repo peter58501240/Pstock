@@ -2435,6 +2435,198 @@ function pDetectMeasuredMove(ctx){
   });
 }
 
+
+// ---------------- Phase 5: patterns 41~46 ----------------
+function pDetectAccelerationReversal(ctx){
+  const len=ctx.endI-ctx.startI+1;
+  if(len<28)return null;
+  let best=null;
+  for(let n=28;n<=Math.min(60,len);n+=4){
+    const s=ctx.endI-n+1,m=s+Math.floor(n*0.58);
+    if(m-s<10||ctx.endI-m<7)continue;
+    const first=[],second=[];
+    for(let i=s;i<m;i++)first.push({i,y:Number(ctx.bars[i].close)});
+    for(let i=m;i<=ctx.endI;i++)second.push({i,y:Number(ctx.bars[i].close)});
+    const base=pFitLine(first),acc=pFitLine(second);if(!base||!acc)continue;
+    const a=atrAt(ctx.atr,ctx.endI,ctx.bars),baseMove=base.slope*(m-s),accMove=acc.slope*(ctx.endI-m+1);
+    if(Math.abs(baseMove)<a*1.2)continue;
+    if(Math.sign(base.slope)!==Math.sign(acc.slope))continue;
+    if(Math.abs(acc.slope)<Math.abs(base.slope)*1.75)continue;
+
+    let maxDev=0;
+    for(let i=m;i<=ctx.endI;i++)maxDev=Math.max(maxDev,Math.abs(Number(ctx.bars[i].close)-pLineY(base,i)));
+    if(maxDev<a*1.8)continue;
+
+    const current=Number(ctx.bars[ctx.endI].close),prev=Number(ctx.bars[ctx.endI-1].close);
+    const yNow=pLineY(base,ctx.endI),yPrev=pLineY(base,ctx.endI-1);
+    const wasUp=base.slope>0;
+    const crossed=wasUp?(current<yNow-a*0.15&&prev>=yPrev-a*0.10):(current>yNow+a*0.15&&prev<=yPrev+a*0.10);
+    const near=Math.abs(current-yNow)<=a*0.60;
+    if(!crossed&&!near)continue;
+    const state=crossed?"confirmed":"near_confirm";
+    const score=pClamp(72+Math.min(10,Math.abs(acc.slope/base.slope)*3)+(crossed?10:5)+pVolumeScore(ctx,state));
+    const line2Start=Math.max(m,ctx.endI-12);
+    const accelFit=pFitLine(second.slice(Math.max(0,second.length-12)));
+    const d=pDetection({
+      id:41,name:"加速趨勢反轉",family:"acceleration_reversal",exclusiveKey:"acceleration_reversal",
+      bias:wasUp?"bearish":"bullish",state,score,scale:ctx.label,window:{startI:s,endI:ctx.endI},
+      anchors:[],
+      lines:[
+        pLineDef("trend",base,s,ctx.endI),
+        pLineDef("upper",accelFit,line2Start,ctx.endI)
+      ],
+      trigger:{type:wasUp?"close_below":"close_above",price:yNow,confirmedI:crossed?ctx.endI:null},
+      invalidation:{type:wasUp?"close_above":"close_below",price:pLineY(acc,ctx.endI)},
+      evidence:["先有穩定基準趨勢","後段斜率明顯加速","價格曾大幅遠離原趨勢線",crossed?"已反向穿越原趨勢線":"正接近原趨勢線"],
+      warnings:crossed?[]:["尚未有效穿越原趨勢線"]
+    });
+    if(!best||d.score>best.score)best=d;
+  }
+  return best;
+}
+function pPrefixLevels(ctx,eventI,type){
+  const prefix=ctx.bars.slice(0,eventI);
+  if(prefix.length<25)return [];
+  const pb=pBase(prefix);
+  return chooseHorizontalLevels(pb.pivots,prefix,pb.atr,type,Math.max(0,prefix.length-100),2)||[];
+}
+function pDetectSpringUpthrust(ctx,spring){
+  const last=ctx.endI;
+  for(let i=last;i>=Math.max(ctx.startI+2,last-3);i--){
+    const levels=pPrefixLevels(ctx,i,spring?"S":"R");
+    for(const lv of levels){
+      const level=Number(lv.level),a=atrAt(ctx.atr,i,ctx.bars),b=ctx.bars[i];
+      const extreme=spring?Number(b.low):Number(b.high),close=Number(b.close);
+      const pierce=spring?level-extreme:extreme-level;
+      if(pierce<a*0.15||pierce>a*0.90)continue;
+      const reclaimed=spring?close>level+a*0.03:close<level-a*0.03;
+      if(!reclaimed)continue;
+      let held=true;
+      for(let j=i+1;j<=last;j++){
+        const cc=Number(ctx.bars[j].close),ee=spring?Number(ctx.bars[j].low):Number(ctx.bars[j].high);
+        if(spring&&(cc<level-a*0.10||ee<extreme-a*0.10))held=false;
+        if(!spring&&(cc>level+a*0.10||ee>extreme+a*0.10))held=false;
+      }
+      if(!held)continue;
+      const vol=pVolMA(ctx.bars,i,20),v=Number(b.volume),volBonus=vol&&v>=vol*1.35?7:0;
+      const follow=Math.max(0,last-i);
+      const score=pClamp(78+Math.min(7,pierce/a*7)+volBonus+Math.min(5,follow*2)+(lv.touches>=3?4:0));
+      return pDetection({
+        id:spring?42:43,name:spring?"彈簧假跌破":"上沖假突破",family:"false_break",exclusiveKey:"false_break",
+        bias:spring?"bullish":"bearish",state:"confirmed",score,scale:ctx.label,
+        window:{startI:Math.max(ctx.startI,i-30),endI:last},
+        anchors:[{role:spring?"假跌破低點":"假突破高點",i,date:b.date,price:extreme}],
+        lines:[pHLine(spring?"support":"resistance",level,Math.max(ctx.startI,i-30),last,"existing_level")],
+        trigger:{type:spring?"close_above":"close_below",price:level,confirmedI:i},
+        invalidation:{type:spring?"close_below":"close_above",price:extreme},
+        evidence:[spring?"刺穿水平支撐":"刺穿水平壓力",spring?"收盤重新站回支撐":"收盤重新跌回壓力下","後續未再次失守",volBonus?"事件量能放大":"量能普通"],
+        warnings:[]
+      });
+    }
+  }
+  return null;
+}
+function pDetectSFP(ctx,bull){
+  const last=ctx.endI,piv=ctx.pivots;
+  for(let i=last;i>=Math.max(ctx.startI+2,last-4);i--){
+    const prior=[...piv].reverse().find(p=>p.i<i&&p.type===(bull?"L":"H"));
+    if(!prior)continue;
+    const a=atrAt(ctx.atr,i,ctx.bars),b=ctx.bars[i],extreme=bull?Number(b.low):Number(b.high),close=Number(b.close);
+    const sweep=bull?prior.y-extreme:extreme-prior.y;
+    if(sweep<a*0.12||sweep>a*1.1)continue;
+    const reclaim=bull?close>prior.y+a*0.02:close<prior.y-a*0.02;
+    if(!reclaim)continue;
+    let move=0;
+    for(let j=i;j<=Math.min(last,i+3);j++){
+      const cc=Number(ctx.bars[j].close);
+      move=Math.max(move,bull?cc-prior.y:prior.y-cc);
+    }
+    if(move<a*0.8)continue;
+
+    // If the swept swing is part of a strong horizontal multi-touch level,
+    // spring/upthrust should win instead of SFP.
+    const nearby=ctx.pivots.filter(p=>p.type===prior.type&&Math.abs(p.y-prior.y)<=Math.max(a*0.55,prior.y*0.01)&&Math.abs(p.i-prior.i)>3);
+    const levelPenalty=nearby.length>=2?8:0;
+    const score=pClamp(82+Math.min(8,move/a*2)-levelPenalty);
+    return pDetection({
+      id:44,name:"擺動失敗型態",family:"false_break",exclusiveKey:"false_break",
+      bias:bull?"bullish":"bearish",state:"confirmed",score,scale:ctx.label,
+      window:{startI:Math.max(ctx.startI,prior.i-10),endI:last},
+      anchors:[{...prior,role:bull?"前低":"前高"},{role:"sweep",i,date:b.date,price:extreme}],
+      lines:[pHLine(bull?"support":"resistance",prior.y,prior.i,last)],
+      trigger:{type:bull?"close_above":"close_below",price:prior.y,confirmedI:i},
+      invalidation:{type:bull?"close_below":"close_above",price:extreme},
+      evidence:[bull?"影線刺破前一個明顯 swing low":"影線刺破前一個明顯 swing high","收盤回到原 swing 內側","後續反向位移至少 0.8 ATR"],
+      warnings:levelPenalty?["前高／前低同時接近水平交易區，與假突破型態有重疊"]:[]
+    });
+  }
+  return null;
+}
+function pDetectQuasimodo(ctx,bull){
+  const seq=pFindLastSequence(ctx,bull?["L","H","L","H","L"]:["H","L","H","L","H"]);
+  if(!seq)return null;
+  const [s1,n1,head,n2,retest]=seq,a=atrAt(ctx.atr,head.i,ctx.bars);
+  const prior=pPriorTrend(ctx,s1.i,40);
+  if(bull){
+    if(prior!=="down")return null;
+    if(!(head.y<s1.y-a*0.45&&n2.y>n1.y+a*0.35))return null;
+    if(Math.abs(retest.y-s1.y)>Math.max(a*1.2,s1.y*0.05))return null;
+  }else{
+    if(prior!=="up")return null;
+    if(!(head.y>s1.y+a*0.45&&n2.y<n1.y-a*0.35))return null;
+    if(Math.abs(retest.y-s1.y)>Math.max(a*1.2,s1.y*0.05))return null;
+  }
+  const moved=pPostMove(ctx,retest,bull?"up":"down",5);
+  if(moved<0.45)return null;
+  const state=moved>=0.8?"confirmed":"near_confirm";
+  const score=pClamp(78+Math.min(10,moved*5)+(state==="confirmed"?5:0));
+  return pDetection({
+    id:45,name:"卡西莫多反轉",family:"quasimodo",exclusiveKey:bull?"bottom_reversal":"top_reversal",
+    bias:bull?"bullish":"bearish",state,score,scale:ctx.label,
+    window:{startI:s1.i,endI:ctx.endI},
+    anchors:[
+      {...s1,role:"肩部"},
+      {...head,role:bull?"更低低點":"更高高點"},
+      {...n2,role:"結構破壞"},
+      {...retest,role:"回測"}
+    ],
+    lines:[pHLine("neckline",s1.y,s1.i,ctx.endI),pHLine("trend",n1.y,n1.i,ctx.endI)],
+    trigger:{type:bull?"close_above":"close_below",price:s1.y,confirmedI:state==="confirmed"?retest.i:null},
+    invalidation:{type:bull?"close_below":"close_above",price:head.y},
+    evidence:[bull?"原空頭結構先創更低低點":"原多頭結構先創更高高點",bull?"之後突破重要反彈高點":"之後跌破重要回檔低點","價格回測肩部區後反向"],
+    warnings:[]
+  });
+}
+function pDetectWolfe(ctx,bull){
+  const seq=pFindLastSequence(ctx,bull?["L","H","L","H","L"]:["H","L","H","L","H"]);
+  if(!seq)return null;
+  const [p1,p2,p3,p4,p5]=seq;
+  const l13=pLineFrom2(p1,p3),l24=pLineFrom2(p2,p4);
+  const start=p1.i,end=p5.i;
+  const d0=Math.abs(pLineY(l24,start)-pLineY(l13,start)),d1=Math.abs(pLineY(l24,end)-pLineY(l13,end));
+  if(!(d0>0&&d1<d0*0.86))return null;
+  const a=atrAt(ctx.atr,p5.i,ctx.bars),y13=pLineY(l13,p5.i);
+  const overshoot=bull?y13-p5.y:p5.y-y13;
+  if(overshoot<-a*0.35||overshoot>a*1.4)return null;
+  const moved=pPostMove(ctx,p5,bull?"up":"down",6);
+  if(moved<0.55)return null;
+  const l14=pLineFrom2(p1,p4),target=pLineY(l14,ctx.endI);
+  const state=moved>=0.9?"confirmed":"near_confirm";
+  const score=pClamp(79+Math.min(8,(1-d1/d0)*12)+Math.min(7,moved*3));
+  return pDetection({
+    id:46,name:"沃爾夫波浪",family:"wolfe",exclusiveKey:"wolfe",
+    bias:bull?"bullish":"bearish",state,score,scale:ctx.label,
+    window:{startI:p1.i,endI:ctx.endI},
+    anchors:seq.map((p,i)=>({...p,role:String(i+1)})),
+    lines:[pLineDef("lower",l13,p1.i,ctx.endI),pLineDef("upper",l24,p2.i,ctx.endI),pLineDef("target",l14,p1.i,ctx.endI)],
+    trigger:{type:bull?"close_above":"close_below",price:y13,confirmedI:state==="confirmed"?p5.i:null},
+    invalidation:{type:bull?"close_below":"close_above",price:p5.y},
+    target:{price:target,method:"wolfe_1_4"},
+    evidence:["五個交替 pivot 完整","1-3 與 2-4 邊界收斂","第 5 點測試／短暫超出 1-3 線","第 5 點後已反向回到結構內"],
+    warnings:state!=="confirmed"?["第 5 點反轉力道仍待確認"]:[]
+  });
+}
+
 function pScanPatterns(bars,mode="all"){
   if(!bars||bars.length<25) return {detections:[],primary:null,secondary:null,ambiguous:false};
   const base=pBase(bars),last=base.lastI;
@@ -2470,7 +2662,14 @@ function pScanPatterns(bars,mode="all"){
       ]:[]),
       pDetect123(ctx,true),pDetect123(ctx,false),
       pDetectPullbackContinuation(ctx,true),pDetectPullbackContinuation(ctx,false),
-      ...(w.label!=="短期"?[pDetectMeasuredMove(ctx)]:[])
+      ...(w.label!=="短期"?[pDetectMeasuredMove(ctx)]:[]),
+      ...(w.label!=="長期"?[
+        pDetectAccelerationReversal(ctx),
+        pDetectSpringUpthrust(ctx,true),pDetectSpringUpthrust(ctx,false),
+        pDetectSFP(ctx,true),pDetectSFP(ctx,false),
+        pDetectQuasimodo(ctx,true),pDetectQuasimodo(ctx,false)
+      ]:[]),
+      ...(w.label!=="短期"?[pDetectWolfe(ctx,true),pDetectWolfe(ctx,false)]:[])
     ].filter(Boolean);
     detections.push(...ds);
   }
