@@ -1595,7 +1595,15 @@ function pBase(bars){
   const major=buildSwings(bars,atr,2.5).filter(p=>!p.forming).map(p=>({...p,strength:"major"}));
   const minor=buildSwings(bars,atr,1.5).filter(p=>!p.forming).map(p=>({...p,strength:"minor"}));
   const local=localStructurePivots(bars,atr,3);
-  const pivots=mergePivots([major,minor,local]);
+  const raw=mergePivots([major,minor,local]).sort((a,b)=>a.i-b.i);
+  const pivots=[];
+  for(const p of raw){
+    const prev=pivots[pivots.length-1];
+    if(!prev||prev.type!==p.type){pivots.push(p);continue;}
+    const moreExtreme=p.type==="H"?p.y>prev.y:p.y<prev.y;
+    const samePrice=Math.abs(p.y-prev.y)<=Math.max(atrAt(atr,p.i,bars)*0.12,p.y*0.002);
+    if(moreExtreme||(samePrice&&strengthRank(p.strength)>strengthRank(prev.strength))) pivots[pivots.length-1]=p;
+  }
   return {bars,atr,major,minor,local,pivots,lastI:bars.length-1};
 }
 function pCtx(base,startI,label){
