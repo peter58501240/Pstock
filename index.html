@@ -2284,7 +2284,7 @@ function pDetectCommonGap(ctx){
     if(prior!=="flat")continue;
     return pDetection({
       id:32,name:"普通缺口",family:"gap",exclusiveKey:"gap_event",bias:"neutral",state:"confirmed",
-      score:74,scale:ctx.label,window:{startI:Math.max(ctx.startI,g.i-12),endI:ctx.endI},
+      score:78,scale:ctx.label,window:{startI:Math.max(ctx.startI,g.i-12),endI:ctx.endI},
       anchors:[{role:"缺口",i:g.i,date:ctx.bars[g.i].date,price:(g.low+g.high)/2}],
       lines:[pHLine("support",g.low,g.i-1,Math.min(ctx.endI,g.i+5)),pHLine("resistance",g.high,g.i-1,Math.min(ctx.endI,g.i+5))],
       trigger:null,invalidation:null,evidence:["盤整背景中的小型缺口","數日內已快速回補","技術意義較低"],warnings:[]
