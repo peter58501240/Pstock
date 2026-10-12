@@ -1939,6 +1939,276 @@ function pDetectTrendBreak(base,bull){
   return null;
 }
 
+
+// ---------------- Phase 3: patterns 17~30 ----------------
+function pAvg(arr){return arr?.length?arr.reduce((s,v)=>s+Number(v||0),0)/arr.length:0;}
+function pRangePosition(ctx,i,lookback=120){
+  const a=Math.max(0,i-lookback+1),slice=ctx.bars.slice(a,i+1);
+  const lo=Math.min(...slice.map(b=>Number(b.low))),hi=Math.max(...slice.map(b=>Number(b.high)));
+  const p=Number(ctx.bars[i].close);
+  return hi>lo?(p-lo)/(hi-lo):0.5;
+}
+function pPivotSeq(ctx,n){
+  return ctx.pivots.length>=n?ctx.pivots.slice(-n):null;
+}
+function pPostMove(ctx,pivot,dir,maxBars=6){
+  const a=atrAt(ctx.atr,pivot.i,ctx.bars);
+  let best=0;
+  for(let i=pivot.i+1;i<=Math.min(ctx.endI,pivot.i+maxBars);i++){
+    const c=Number(ctx.bars[i].close);
+    best=Math.max(best,dir==="up"?c-pivot.y:pivot.y-c);
+  }
+  return best/Math.max(a,0.01);
+}
+function pQuadFit(values){
+  const n=values.length;if(n<5)return null;
+  let sx=0,sx2=0,sx3=0,sx4=0,sy=0,sxy=0,sx2y=0;
+  for(let i=0;i<n;i++){
+    const x=i-(n-1)/2,y=Number(values[i]);
+    const x2=x*x;
+    sx+=x;sx2+=x2;sx3+=x2*x;sx4+=x2*x2;
+    sy+=y;sxy+=x*y;sx2y+=x2*y;
+  }
+  const M=[[n,sx,sx2,sy],[sx,sx2,sx3,sxy],[sx2,sx3,sx4,sx2y]];
+  for(let col=0;col<3;col++){
+    let pivot=col;for(let r=col+1;r<3;r++)if(Math.abs(M[r][col])>Math.abs(M[pivot][col]))pivot=r;
+    [M[col],M[pivot]]=[M[pivot],M[col]];
+    const d=M[col][col];if(Math.abs(d)<1e-9)return null;
+    for(let j=col;j<4;j++)M[col][j]/=d;
+    for(let r=0;r<3;r++)if(r!==col){const k=M[r][col];for(let j=col;j<4;j++)M[r][j]-=k*M[col][j];}
+  }
+  const [cc,bb,aa]=[M[0][3],M[1][3],M[2][3]];
+  let ss=0,sst=0;const mean=sy/n;
+  for(let i=0;i<n;i++){
+    const x=i-(n-1)/2,y=Number(values[i]),yh=aa*x*x+bb*x+cc;
+    ss+=(y-yh)*(y-yh);sst+=(y-mean)*(y-mean);
+  }
+  return {a:aa,b:bb,c:cc,r2:sst>0?1-ss/sst:0};
+}
+function pDetectTriple(ctx,bottom){
+  const seq=pFindLastSequence(ctx,bottom?["L","H","L","H","L"]:["H","L","H","L","H"]);
+  if(!seq)return null;
+  const [p1,n1,p2,n2,p3]=seq,a=atrAt(ctx.atr,p3.i,ctx.bars);
+  const extrema=[p1.y,p2.y,p3.y],avg=pAvg(extrema),tol=Math.max(a*0.75,avg*0.03);
+  if(Math.max(...extrema)-Math.min(...extrema)>tol)return null;
+  if(bottom&&p2.y<Math.min(p1.y,p3.y)-a*0.55)return null;
+  if(!bottom&&p2.y>Math.max(p1.y,p3.y)+a*0.55)return null;
+  if(Math.abs(n1.y-n2.y)>Math.max(a*1.2,pAvg([n1.y,n2.y])*0.05))return null;
+  const prior=pPriorTrend(ctx,p1.i);
+  if(bottom&&prior!=="down"&&prior!=="flat")return null;
+  if(!bottom&&prior!=="up"&&prior!=="flat")return null;
+  const neck=pAvg([n1.y,n2.y]),dir=bottom?"up":"down",st=pDirectionalState(ctx,dir,neck);
+  const sim=1-(Math.max(...extrema)-Math.min(...extrema))/Math.max(tol,0.01);
+  const score=pCommonScore(29+sim*6,19,prior==="flat"?8:13,st.state,pVolumeScore(ctx,st.state),0);
+  return pDetection({
+    id:bottom?17:18,name:bottom?"三重底":"三重頂",family:"triple",
+    exclusiveKey:bottom?"bottom_reversal":"top_reversal",bias:bottom?"bullish":"bearish",
+    state:st.state,score,scale:ctx.label,window:{startI:p1.i,endI:ctx.endI},
+    anchors:[{...p1,role:"第一點"},{...p2,role:"第二點"},{...p3,role:"第三點"}],
+    lines:[pHLine("neckline",neck,p1.i,ctx.endI)],
+    trigger:{type:bottom?"close_above":"close_below",price:neck,confirmedI:st.confirmedI},
+    invalidation:{type:bottom?"close_below":"close_above",price:bottom?Math.min(...extrema):Math.max(...extrema)},
+    evidence:[bottom?"三個低點位於同一支撐區":"三個高點位於同一壓力區","中間有兩次可見反彈／回落","中央極值未明顯突出"],
+    warnings:st.state==="forming"?["尚未突破頸線區"]:[]
+  });
+}
+function pDetectRounded(ctx,bottom){
+  const len=ctx.endI-ctx.startI+1;
+  if(len<30)return null;
+  const closes=ctx.bars.slice(ctx.startI,ctx.endI+1).map(b=>Number(b.close));
+  const fit=pQuadFit(closes);if(!fit)return null;
+  const price=Number(ctx.bars[ctx.endI].close),aNow=atrAt(ctx.atr,ctx.endI,ctx.bars);
+  const curvature=fit.a*len*len/Math.max(price,0.01);
+  if(bottom&&curvature<0.10)return null;
+  if(!bottom&&curvature>-0.10)return null;
+  if(fit.r2<0.38)return null;
+
+  const q=Math.floor(len/4);
+  const lFit=pFitLine(closes.slice(0,q).map((y,k)=>({i:k,y})));
+  const cFit=pFitLine(closes.slice(q,3*q).map((y,k)=>({i:k,y})));
+  const rFit=pFitLine(closes.slice(3*q).map((y,k)=>({i:k,y})));
+  if(!lFit||!rFit)return null;
+  if(bottom&&!(lFit.slope<0&&rFit.slope>0))return null;
+  if(!bottom&&!(lFit.slope>0&&rFit.slope<0))return null;
+  if(Math.abs(cFit?.slope||0)>Math.max(Math.abs(lFit.slope),Math.abs(rFit.slope))*0.75)return null;
+
+  const slice=ctx.bars.slice(ctx.startI,ctx.endI+1);
+  let turnLocal=0;
+  if(bottom){
+    const vals=slice.map(b=>Number(b.low)),m=Math.min(...vals);turnLocal=vals.indexOf(m);
+  }else{
+    const vals=slice.map(b=>Number(b.high)),m=Math.max(...vals);turnLocal=vals.indexOf(m);
+  }
+  if(turnLocal<q*0.65||turnLocal>len-q*0.65)return null;
+
+  const leftWindow=slice.slice(0,Math.max(5,q+3));
+  const rim=bottom?Math.max(...leftWindow.map(b=>Number(b.high))):Math.min(...leftWindow.map(b=>Number(b.low)));
+  const dir=bottom?"up":"down",st=pDirectionalState(ctx,dir,rim);
+  const prior=pPriorTrend(ctx,ctx.startI,30);
+  if(bottom&&prior==="up")return null;
+  if(!bottom&&prior==="down")return null;
+  const geom=27+Math.min(8,Math.abs(curvature)*18)+Math.min(5,fit.r2*6);
+  const score=pCommonScore(geom,16,prior==="flat"?7:12,st.state,pVolumeScore(ctx,st.state),0);
+  const turnI=ctx.startI+turnLocal;
+  return pDetection({
+    id:bottom?19:20,name:bottom?"圓弧底":"圓弧頂",family:"rounding",
+    exclusiveKey:bottom?"bottom_reversal":"top_reversal",bias:bottom?"bullish":"bearish",
+    state:st.state,score,scale:ctx.label,window:{startI:ctx.startI,endI:ctx.endI},
+    anchors:[{role:bottom?"底部":"頂部",i:turnI,date:ctx.bars[turnI].date,price:bottom?ctx.bars[turnI].low:ctx.bars[turnI].high}],
+    lines:[pHLine(bottom?"resistance":"support",rim,ctx.startI,ctx.endI)],
+    trigger:{type:bottom?"close_above":"close_below",price:rim,confirmedI:st.confirmedI},
+    invalidation:{type:bottom?"structure_break":"structure_break",price:bottom?Number(ctx.bars[turnI].low):Number(ctx.bars[turnI].high)},
+    evidence:[bottom?"左側緩跌、右側緩升":"左側緩升、右側緩跌","轉折寬且非尖銳","二次曲線擬合通過"],
+    warnings:st.state==="forming"?["尚未突破左側重要反應位"]:[]
+  });
+}
+function pDetectCupHandle(ctx,inverse){
+  const p=ctx.pivots;
+  if(p.length<4)return null;
+  const rimType=inverse?"L":"H",bottomType=inverse?"H":"L";
+  let best=null;
+  for(let j=p.length-2;j>=2;j--){
+    const right=p[j];if(right.type!==rimType)continue;
+    const mid=[...p.slice(1,j)].reverse().find(x=>x.type===bottomType);if(!mid)continue;
+    const left=[...p.slice(0,p.indexOf(mid))].reverse().find(x=>x.type===rimType);if(!left)continue;
+    const duration=right.i-left.i;if(duration<20)return null;
+    const a=atrAt(ctx.atr,right.i,ctx.bars),tol=Math.max(a*1.1,Math.max(left.y,right.y)*0.055);
+    if(Math.abs(left.y-right.y)>tol)continue;
+    const depth=inverse?mid.y-pAvg([left.y,right.y]):pAvg([left.y,right.y])-mid.y;
+    if(depth<a*2.4)continue;
+    const handle=p.slice(j+1).find(x=>x.type===bottomType);
+    if(!handle)continue;
+    const handleDepth=inverse?handle.y-right.y:right.y-handle.y;
+    if(handleDepth<0||handleDepth>depth*0.45)continue;
+    if(ctx.endI-handle.i>16)continue;
+    const prior=pPriorTrend(ctx,left.i,35);
+    if(!inverse&&prior!=="up")continue;
+    if(inverse&&prior!=="down")continue;
+    const rim=pAvg([left.y,right.y]),dir=inverse?"down":"up",st=pDirectionalState(ctx,dir,rim);
+    const score=pCommonScore(31+Math.max(0,6-Math.abs(left.y-right.y)/Math.max(tol,0.01)*6),18,15,st.state,pVolumeScore(ctx,st.state),0);
+    const d=pDetection({
+      id:inverse?22:21,name:inverse?"倒杯柄型態":"杯柄型態",family:"cup_handle",
+      exclusiveKey:inverse?"top_reversal":"bottom_reversal",bias:inverse?"bearish":"bullish",
+      state:st.state,score,scale:ctx.label,window:{startI:left.i,endI:ctx.endI},
+      anchors:[{...left,role:"左杯緣"},{...mid,role:inverse?"杯頂":"杯底"},{...right,role:"右杯緣"},{...handle,role:"把手"}],
+      lines:[pHLine(inverse?"support":"resistance",rim,left.i,ctx.endI)],
+      trigger:{type:inverse?"close_below":"close_above",price:rim,confirmedI:st.confirmedI},
+      invalidation:{type:inverse?"close_above":"close_below",price:handle.y},
+      evidence:["杯身為寬 U 型","左右杯緣接近","右側存在短把手","把手回撤未過深"],
+      warnings:st.state==="forming"?["尚未突破杯緣／把手確認位"]:[]
+    });
+    if(!best||d.score>best.score)best=d;
+  }
+  return best;
+}
+function pDetectVReversal(ctx,bottom){
+  const p=ctx.pivots;if(p.length<3)return null;
+  const turnType=bottom?"L":"H";
+  for(let k=p.length-2;k>=1;k--){
+    const turn=p[k];if(turn.type!==turnType)continue;
+    const left=p[k-1],right=p[k+1];
+    if(left.type===turn.type||right.type===turn.type)continue;
+    const leftSpan=turn.i-left.i,rightSpan=right.i-turn.i;
+    if(leftSpan>18||rightSpan>18||leftSpan<3||rightSpan<3)continue;
+    const a=atrAt(ctx.atr,turn.i,ctx.bars);
+    const leftMove=Math.abs(turn.y-left.y),rightMove=Math.abs(right.y-turn.y);
+    if(leftMove<a*3||rightMove<a*2.5)continue;
+    const sharp=Math.min(leftMove/leftSpan,rightMove/rightSpan)/Math.max(a,0.01);
+    if(sharp<0.22)continue;
+    const prior=pPriorTrend(ctx,left.i,30);
+    if(bottom&&prior!=="down")continue;
+    if(!bottom&&prior!=="up")continue;
+    const trigger=right.y,dir=bottom?"up":"down",st=pDirectionalState(ctx,dir,trigger);
+    const score=pCommonScore(30+Math.min(6,sharp*12),16,15,st.state,pVolumeScore(ctx,st.state),0);
+    return pDetection({
+      id:bottom?23:24,name:bottom?"尖底反轉":"尖頂反轉",family:"v_reversal",
+      exclusiveKey:bottom?"bottom_reversal":"top_reversal",bias:bottom?"bullish":"bearish",
+      state:st.state,score,scale:ctx.label,window:{startI:left.i,endI:ctx.endI},
+      anchors:[{...turn,role:bottom?"反轉低點":"反轉高點"}],
+      lines:[pHLine(bottom?"resistance":"support",trigger,left.i,ctx.endI)],
+      trigger:{type:bottom?"close_above":"close_below",price:trigger,confirmedI:st.confirmedI},
+      invalidation:{type:bottom?"close_below":"close_above",price:turn.y},
+      evidence:[bottom?"左側急跌":"左側急升",bottom?"右側快速折返":"右側快速回落","轉折時間短且斜率大"],
+      warnings:[]
+    });
+  }
+  return null;
+}
+function pDetectDiamond(ctx,bottom){
+  const seq=pPivotSeq(ctx,7);if(!seq)return null;
+  const vals=seq.map(p=>p.y);
+  const widths=[];
+  for(let i=1;i<seq.length;i++)widths.push(Math.abs(seq[i].y-seq[i-1].y));
+  const first=pAvg(widths.slice(0,2)),mid=pAvg(widths.slice(2,4)),late=pAvg(widths.slice(-2));
+  if(!(mid>first*1.18&&late<mid*0.78))return null;
+  const prior=pPriorTrend(ctx,seq[0].i,35);
+  if(bottom&&prior!=="down")return null;
+  if(!bottom&&prior!=="up")return null;
+  const H=seq.filter(p=>p.type==="H"),L=seq.filter(p=>p.type==="L");
+  if(H.length<2||L.length<2)return null;
+  const rightH=H.slice(-2),rightL=L.slice(-2),upper=pLineFrom2(rightH[0],rightH[1]),lower=pLineFrom2(rightL[0],rightL[1]);
+  const trigger=bottom?pLineY(upper,ctx.endI):pLineY(lower,ctx.endI),dir=bottom?"up":"down",st=pDirectionalState(ctx,dir,trigger);
+  const score=pCommonScore(30+Math.min(6,(mid/Math.max(first,0.01)-1)*8),18,15,st.state,pVolumeScore(ctx,st.state),0);
+  return pDetection({
+    id:bottom?25:26,name:bottom?"菱形底":"菱形頂",family:"diamond",
+    exclusiveKey:bottom?"bottom_reversal":"top_reversal",bias:bottom?"bullish":"bearish",
+    state:st.state,score,scale:ctx.label,window:{startI:seq[0].i,endI:ctx.endI},
+    anchors:seq.slice(-5).map((p,i)=>({...p,role:"P"+(i+1)})),
+    lines:[pLineDef("upper",upper,rightH[0].i,ctx.endI),pLineDef("lower",lower,rightL[0].i,ctx.endI)],
+    trigger:{type:bottom?"close_above":"close_below",price:trigger,confirmedI:st.confirmedI},
+    invalidation:{type:bottom?"close_below":"close_above",price:bottom?Math.min(...vals):Math.max(...vals)},
+    evidence:["前半段波動擴張","後半段波動收斂","形成近似菱形右側邊界"],warnings:[]
+  });
+}
+function pDetectBroadening(ctx,highZone){
+  const {highs,lows}=pHighLow(ctx),H=pWindowLinePoints(highs,4),L=pWindowLinePoints(lows,4);
+  if(H.length<2||L.length<2)return null;
+  const upper=pFitLine(H),lower=pFitLine(L),startI=Math.max(ctx.startI,Math.min(H[0].i,L[0].i)),endI=ctx.endI;
+  const d0=pLineY(upper,startI)-pLineY(lower,startI),d1=pLineY(upper,endI)-pLineY(lower,endI);
+  if(!(d0>0&&d1>d0*1.18))return null;
+  if(!(upper.slope>0&&lower.slope<0))return null;
+  const pos=pRangePosition(ctx,startI,140);
+  if(highZone&&pos<0.58)return null;
+  if(!highZone&&pos>0.42)return null;
+  const close=Number(ctx.bars[endI].close),up=pLineY(upper,endI),dn=pLineY(lower,endI),a=atrAt(ctx.atr,endI,ctx.bars);
+  let dir=null,trigger=null,state="forming";
+  if(close>up+a*0.15){dir="up";trigger=up;state="confirmed";}
+  else if(close<dn-a*0.15){dir="down";trigger=dn;state="confirmed";}
+  else if(Math.min(Math.abs(close-up),Math.abs(close-dn))<=a*0.6){dir=Math.abs(close-up)<Math.abs(close-dn)?"up":"down";trigger=dir==="up"?up:dn;state="near_confirm";}
+  const score=pCommonScore(29+Math.min(7,(d1/d0-1)*10),18,8,state,pVolumeScore(ctx,state),0);
+  return pDetection({
+    id:highZone?28:27,name:highZone?"高檔擴散型態":"低檔擴散型態",family:"broadening",
+    exclusiveKey:"broadening",bias:"neutral",state,score,scale:ctx.label,window:{startI,endI},
+    anchors:[...H.slice(-2),...L.slice(-2)],
+    lines:[pLineDef("upper",upper,startI,endI),pLineDef("lower",lower,startI,endI)],
+    trigger:trigger?{type:dir==="up"?"close_above":"close_below",price:trigger,confirmedI:state==="confirmed"?endI:null}:null,
+    invalidation:null,evidence:["高點逐步抬高","低點逐步降低","上下邊界向右發散",highZone?"位於相對高檔":"位於相對低檔"],
+    warnings:state==="forming"?["尚未突破任一邊界"]:[]
+  });
+}
+function pDetectBroadeningWedge(ctx,rising){
+  const {highs,lows}=pHighLow(ctx),H=pWindowLinePoints(highs,4),L=pWindowLinePoints(lows,4);
+  if(H.length<2||L.length<2)return null;
+  const upper=pFitLine(H),lower=pFitLine(L),startI=Math.max(ctx.startI,Math.min(H[0].i,L[0].i)),endI=ctx.endI;
+  const d0=pLineY(upper,startI)-pLineY(lower,startI),d1=pLineY(upper,endI)-pLineY(lower,endI);
+  if(!(d0>0&&d1>d0*1.15))return null;
+  if(rising&&!(upper.slope>0&&lower.slope>0))return null;
+  if(!rising&&!(upper.slope<0&&lower.slope<0))return null;
+  if(rising&&upper.slope<=lower.slope)return null;
+  if(!rising&&Math.abs(lower.slope)<=Math.abs(upper.slope))return null;
+  const trigger=rising?pLineY(lower,endI):pLineY(upper,endI),dir=rising?"down":"up",st=pDirectionalState(ctx,dir,trigger);
+  const score=pCommonScore(29+Math.min(7,(d1/d0-1)*10),18,8,st.state,pVolumeScore(ctx,st.state),0);
+  return pDetection({
+    id:rising?29:30,name:rising?"上升擴散楔形":"下降擴散楔形",family:"broadening_wedge",
+    exclusiveKey:"broadening_wedge",bias:rising?"bearish":"bullish",state:st.state,score,scale:ctx.label,
+    window:{startI,endI},anchors:[...H.slice(-2),...L.slice(-2)],
+    lines:[pLineDef("upper",upper,startI,endI),pLineDef("lower",lower,startI,endI)],
+    trigger:{type:rising?"close_below":"close_above",price:trigger,confirmedI:st.confirmedI},
+    invalidation:{type:rising?"close_above":"close_below",price:rising?pLineY(upper,endI):pLineY(lower,endI)},
+    evidence:[rising?"高低點同步墊高":"高低點同步下移","上下邊界向右擴張"],warnings:[]
+  });
+}
+
 function pScanPatterns(bars,mode="all"){
   if(!bars||bars.length<25) return {detections:[],primary:null,secondary:null,ambiguous:false};
   const base=pBase(bars),last=base.lastI;
@@ -1957,7 +2227,16 @@ function pScanPatterns(bars,mode="all"){
       pDetectWedge(ctx,true),pDetectWedge(ctx,false),
       pDetectDouble(ctx,true),pDetectDouble(ctx,false),
       pDetectHeadShoulders(ctx,true),pDetectHeadShoulders(ctx,false),
-      pDetectFlag(ctx,true,true),pDetectFlag(ctx,false,true)
+      pDetectFlag(ctx,true,true),pDetectFlag(ctx,false,true),
+      pDetectTriple(ctx,true),pDetectTriple(ctx,false),
+      ...(w.label!=="短期"?[
+        pDetectRounded(ctx,true),pDetectRounded(ctx,false),
+        pDetectCupHandle(ctx,false),pDetectCupHandle(ctx,true),
+        pDetectVReversal(ctx,true),pDetectVReversal(ctx,false),
+        pDetectDiamond(ctx,true),pDetectDiamond(ctx,false)
+      ]:[]),
+      pDetectBroadening(ctx,false),pDetectBroadening(ctx,true),
+      pDetectBroadeningWedge(ctx,true),pDetectBroadeningWedge(ctx,false)
     ].filter(Boolean);
     detections.push(...ds);
   }
