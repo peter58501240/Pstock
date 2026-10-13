@@ -79,11 +79,11 @@
       <div class="card"><div class="label">核心股票本金</div><div class="value">300,000</div><div class="hint">固定績效基準</div></div>
       <div class="card"><div class="label">累積已實現投資收益</div><div class="value red">+89,388</div><div class="hint">交易＋股息＋折讓等</div></div>
       <div class="card"><div class="label">未實現損益</div><div id="unrealized" class="value">--</div><div class="hint">券商口徑：已扣預估賣出手續費與證交稅</div></div>
-      <div class="card"><div class="label">交割後現金</div><div class="value blue">9,174</div><div class="hint">已含 10/08 補入現金 9,600 元；依實際買進手續費修正</div></div>
+      <div class="card"><div class="label">交割後現金</div><div id="cashValue" class="value blue">--</div><div class="hint">依目前交割紀錄計算；已扣 10/13 新增 00935 100 股買進交割款</div></div>
     </div>
     <div class="cards">
       <div class="card"><div class="label">目前股票市值</div><div id="marketValue" class="value">--</div></div>
-      <div class="card"><div class="label">股票總成本</div><div id="stockCost" class="value">350,214</div></div>
+      <div class="card"><div class="label">股票總成本</div><div id="stockCost" class="value">--</div></div>
       <div class="card"><div class="label">總投資損益</div><div id="totalPnl" class="value">--</div></div>
       <div class="card"><div class="label">總報酬率</div><div id="totalReturn" class="value">--</div></div>
     </div>
@@ -417,6 +417,8 @@ function render(){
     $("marketDate").textContent="收盤："+(pricePayload.market_date||"備援 2026/10/07");
   }
   $("unrealized").textContent=sign(unrealized); $("unrealized").className="value "+cls(unrealized);
+  $("cashValue").textContent=nf.format(CASH);
+  $("stockCost").textContent=nf.format(totalCost);
   $("marketValue").textContent=nf.format(marketValue);
   $("totalPnl").textContent=sign(totalPnl); $("totalPnl").className="value "+cls(totalPnl);
   $("totalReturn").textContent=pct(totalReturn); $("totalReturn").className="value "+cls(totalReturn);
