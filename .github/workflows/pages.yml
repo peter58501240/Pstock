@@ -33,9 +33,11 @@ jobs:
           python-version: "3.12"
 
       - name: Fetch latest Taiwan closing prices
+        if: ${{ !contains(github.event.head_commit.message, '[skip-market-fetch]') }}
         run: python scripts/update_prices.py
 
       - name: Fetch historical OHLCV for trendline analysis
+        if: ${{ !contains(github.event.head_commit.message, '[skip-market-fetch]') }}
         run: python scripts/update_history.py
 
       - name: Setup Pages
