@@ -102,10 +102,10 @@ label.field{display:block;color:#c2d1e4;font-size:11px}
 const $=id=>document.getElementById(id);
 const SpeechAPI=window.SpeechRecognition||window.webkitSpeechRecognition;
 const MAX_CHARS=9000;
-const MAX_TRANSLATE_CHARS=450;
+const MAX_TRANSLATE_CHARS=360;
 let language="ja-JP", active=false, recognizer=null, epoch=0, engine=0, state="idle", pendingTimer=null, retryTimer=null, healthTimer=null, clockTimer=null, restartCount=0, lastSpeech=0, beginTime=0, lastError="", firstResult=false, wakeLock=null;
 let finalSrc="", finalZh="", inProgress="", recognizedSlots=new Map(), pendingCarry=null, translations=[], translating=false, translatedWait=0, draftTimer=null, draftStamp=0, draftId=0, draftRequest=null;
-let translationFailTime=0, translationErrorCount=0, fontBig=false, lastCommitedAt=0;
+let translationFailTime=0, translationErrorCount=0, fontBig=false, lastCommitedAt=0, viewToken=0;
 const toText=(v)=>String(v||"").trim();
 const sourceCode=()=>language.startsWith("ja")?"ja":"en";
 function setState(t,kind){$("state").textContent=t;$("state").className=kind||""}
@@ -272,7 +272,7 @@ if(!SpeechAPI){info("此瀏覽器不支援 Web Speech 語音辨識。請使用 A
 if(!window.isSecureContext){info("請從 HTTPS 網頁開啟，才能存取麥克風。",true);return}
 if(!$("consent").checked){$("settings").open=true;info("開始前請先勾選資料傳送風險同意。",true);return}
 if($("translationMode").value==="own"&&!/^https:\/\//i.test($("ownUrl").value.trim())){$("settings").open=true;info("請先填寫自有 HTTPS 翻譯端點。",true);return}
-epoch++;active=true;state="idle";recognizer=null;engine=0;restartCount=0;firstResult=false;lastError="";lastSpeech=Date.now();lastCommitedAt=0;
+epoch++;viewToken++;active=true;state="idle";recognizer=null;engine=0;restartCount=0;firstResult=false;lastError="";lastSpeech=Date.now();lastCommitedAt=0;
 finalSrc="";finalZh="";inProgress="";translations=[];translating=false;translatedWait=0;pendingCarry=null;translationErrorCount=0;translationFailTime=0;clearTimeout(retryTimer);retryTimer=null;clearTimeout(pendingTimer);
 $("zhDraft").textContent="";$("srcDraft").textContent="";render();
 $("startBtn").disabled=true;$("stopBtn").disabled=false;$("jaBtn").disabled=true;$("enBtn").disabled=true;$("translationMode").disabled=true;$("previewMode").disabled=true;
@@ -290,7 +290,7 @@ $("jaBtn").setAttribute("aria-pressed",lang==="ja-JP"?"true":"false");$("enBtn")
 $("sourceTitle").textContent=lang==="ja-JP"?"🇯🇵 日文原文":"🇬🇧 英文原文";
 }
 let batchTimer=null;
-function scheduleTranslation(){if(batchTimer)return;batchTimer=setTimeout(()=>{batchTimer=null;processTranslations()},260)}
+function scheduleTranslation(){if(batchTimer)return;batchTimer=setTimeout(()=>{batchTimer=null;processTranslations()},420)}
 function takeBatch(){
 const currentRun=epoch,limit=MAX_TRANSLATE_CHARS;
 let text="",type="",mode="";
@@ -298,17 +298,28 @@ while(translations.length&&translations[0].run!==currentRun)translations.shift()
 while(translations.length){
 const next=translations[0];
 if(!text){type=next.lang;mode=next.mode}
-if(next.run!==currentRun||next.lang!==type||next.mode!==mode||text.length+next.text.length>limit&&text)break;
+if(next.run!==currentRun||next.lang!==type||next.mode!==mode||utf8length(text+" "+next.text)>440&&text)break;
 translations.shift();text+=(text?" ":"")+next.text;
-if(text.length>=limit)break;
+if(utf8length(text)>=limit)break;
 }
 return{text,mode,lang:type,run:currentRun}
+}
+function utf8length(str){return new TextEncoder().encode(str).length}
+function splitTranslationInput(str){
+const chunks=[];let current="",bytes=0;
+for(const char of str){
+const size=utf8length(char);
+if(current&&bytes+size>440){chunks.push(current);current="";bytes=0}
+current+=char;bytes+=size;
+}
+if(current)chunks.push(current);
+return chunks;
 }
 async function requestTranslate(input,from,mode){
 if(mode==="original")return "";
 let translated=[];
-for(let p=0;p<input.length;p+=430){
-const chunk=input.slice(p,p+430);const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),11000);
+for(const chunk of splitTranslationInput(input)){
+const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),11000);
 try{
 let response;
 if(mode==="cloud"){
@@ -338,6 +349,7 @@ let first=true;
 while(translations.length){
 const task=takeBatch();
 if(!task.text)break;
+const currentView=viewToken;
 if(task.run!==epoch)continue;
 if(!first)await new Promise(r=>setTimeout(r,650));
 first=false;
@@ -345,11 +357,11 @@ $("translationState").textContent=translations.length?"翻譯排隊中":"翻譯�
 try{
 if(translationFailTime&&Date.now()-translationFailTime<4000)await new Promise(r=>setTimeout(r,1000));
 const zh=await requestTranslate(task.text,task.lang,task.mode);
-if(task.run===epoch){
+if(task.run===epoch&&currentView===viewToken){
 finalZh=trimLast(finalZh+(finalZh?"\n":"")+zh,MAX_CHARS);$("zhDraft").textContent="";render();$("translationState").textContent="翻譯持續中";translationErrorCount=0;
 }
 }catch(e){
-if(task.run===epoch){translationErrorCount++;translationFailTime=Date.now();
+if(task.run===epoch&&currentView===viewToken){translationErrorCount++;translationFailTime=Date.now();
 const reason=e.name==="AbortError"?"連線逾時":String(e.message||e);
 $("translationState").textContent="翻譯服務異常";
 info("原文仍會持續顯示，但翻譯失敗："+reason+"。免費服務可能限流。",true);
@@ -375,6 +387,7 @@ $("zhDraft").textContent=(finalZh?" ":"")+zh;scroll("zhStream");
 },160);
 }
 function clearView(){
+viewToken++;
 finalSrc="";finalZh="";inProgress="";pendingCarry=null;clearTimeout(pendingTimer);pendingTimer=null;translations=[];
 draftId++;$("zhDraft").textContent="";render();$("translationState").textContent=active?"已清空目前字幕":"待命";
 }
