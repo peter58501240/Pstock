@@ -1,0 +1,271 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#0e1424">
+<meta name="description" content="實體會議室即時語音轉文字與繁體中文字幕（測試版）">
+<title>會議譯字幕｜日英語音轉繁中</title>
+<style>
+:root{font-family:system-ui,-apple-system,"Noto Sans TC","PingFang TC",sans-serif;color-scheme:dark;--bg:#0e1424;--card:#171f33;--line:#2c3750;--fg:#f2f6ff;--sub:#a8b5cf;--aqua:#6be1cf;--blue:#8faeff}
+*{box-sizing:border-box}
+body{margin:0;min-height:100vh;background:radial-gradient(ellipse at 70% -10%,#20375b 0,transparent 45%),var(--bg);color:var(--fg)}
+main{max-width:850px;margin:auto;padding:19px 15px max(32px,env(safe-area-inset-bottom))}
+header{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:18px}
+.brand{display:flex;align-items:center;gap:11px}
+.logo{width:42px;height:42px;border-radius:14px;display:grid;place-items:center;background:#263e61;color:var(--aqua);font-size:23px}
+h1{margin:0;font-size:21px;letter-spacing:.02em}
+.subtitle{color:var(--sub);font-size:12px;margin-top:3px}
+.pill{font-size:12px;white-space:nowrap;padding:7px 10px;border:1px solid #3e4e67;background:#202a40;border-radius:99px;color:#c0d3e9}
+.pill.active{color:#91f3e2;border-color:#438f87;background:#1b3b3a}
+.card{background:rgba(23,31,51,.94);border:1px solid var(--line);border-radius:20px;padding:18px;margin-bottom:13px}
+.card-head{font-size:12px;font-weight:800;letter-spacing:.12em;color:#afbed8;margin:0 0 13px}
+.controls{display:grid;grid-template-columns:1fr 1fr;gap:11px}
+.field label{display:block;font-size:12px;color:var(--sub);margin-bottom:8px}
+select,input[type=text],input[type=url],textarea{width:100%;padding:13px 12px;border-radius:12px;border:1px solid #42516c;background:#0e1829;color:var(--fg);font:inherit;outline:none}
+select:focus,input:focus,textarea:focus{border-color:var(--aqua)}
+.note{font-size:12px;line-height:1.65;color:var(--sub);margin:12px 0 0}
+.consent{display:flex;gap:9px;padding:12px;border-radius:13px;background:#282c3c;border:1px solid #5b4f4d;margin-top:14px;line-height:1.55;font-size:12px;color:#ffe8c8}
+.consent input{width:18px;height:18px;flex:none;accent-color:#67dacc}
+.buttons{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:14px}
+button{font:inherit;cursor:pointer;border-radius:14px;min-height:48px;padding:11px 15px;font-weight:750;border:1px solid #536782;background:#202f49;color:#eaf2ff}
+button:disabled{opacity:.45;cursor:not-allowed}
+button.primary{background:linear-gradient(120deg,#75ead5,#82c8fa);border-color:transparent;color:#102337}
+button.danger{background:#5c3143;border-color:#8b5369;color:#fff}
+button.small{min-height:36px;border-radius:11px;font-size:12px;padding:7px 12px}
+.indicators{display:flex;align-items:center;gap:13px;flex-wrap:wrap;margin-top:12px;font-size:12px;color:var(--sub)}
+.micdot{display:inline-block;width:9px;height:9px;background:#78869c;border-radius:100%;margin-right:5px}
+.micdot.live{background:var(--aqua);box-shadow:0 0 0 5px #6be1cf25}
+.hero{border:1px solid #316d77;background:linear-gradient(155deg,#12343c,#182743 80%);padding:22px 19px 25px;border-radius:22px;margin-bottom:13px;min-height:240px;display:flex;flex-direction:column;justify-content:space-between}
+.hero-top{display:flex;align-items:center;justify-content:space-between;gap:10px;font-size:12px;color:#abf5e6}
+.fontbuttons{display:flex;gap:5px}
+.fontbuttons button{padding:4px 9px;min-height:32px;border:1px solid #538e91;background:#204750}
+#latestTranslation{font-size:clamp(26px,7vw,45px);font-weight:850;line-height:1.43;white-space:pre-wrap;overflow-wrap:anywhere;margin:19px 0 10px;letter-spacing:.01em}
+#latestTranslation.lg{font-size:clamp(34px,9.4vw,60px)}
+.original{font-size:14px;line-height:1.55;color:#b4c9d7;white-space:pre-wrap;overflow-wrap:anywhere}
+.interim{margin:12px 0 0;font-size:13px;color:#f0dca2;line-height:1.5;min-height:18px}
+#message{font-size:13px;line-height:1.6;color:#d4dfef;background:#263047;border:1px solid #3a4a65;padding:11px 13px;border-radius:12px;margin-bottom:13px}
+#message.error{color:#ffd2cb;border-color:#7e4a51;background:#3b2734}
+.history-head{display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap}
+.history-actions{display:flex;gap:8px}
+#history{max-height:470px;overflow:auto}
+.item{padding:14px 0;border-top:1px solid var(--line)}
+.item:first-child{border-top:none}
+.item .time{color:#9caecb;font-size:11px;margin-bottom:7px}
+.item .src{font-size:13px;color:#becbdd;line-height:1.55;white-space:pre-wrap;overflow-wrap:anywhere}
+.item .dst{margin-top:8px;font-size:17px;font-weight:700;line-height:1.6;white-space:pre-wrap;overflow-wrap:anywhere}
+.item .dst.pending{color:#e8bb72;font-weight:400}
+.empty{color:#9cacbf;font-size:13px;text-align:center;padding:32px 0}
+details{margin:11px 0}
+summary{color:#bacbe5;cursor:pointer;font-size:13px}
+.testrow{display:flex;gap:9px;align-items:stretch;margin-top:12px}
+.testrow input{flex:1;min-width:0}
+.foot{font-size:12px;line-height:1.7;color:#9dabbe;margin:18px 1px}
+a{color:#9dc9fa}
+@media(min-width:650px){main{padding-top:30px}.hero{min-height:300px}.card{padding:22px}}
+@media(max-width:370px){.controls{grid-template-columns:1fr}.buttons{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<main>
+<header>
+<div class="brand"><div class="logo" aria-hidden="true">譯</div><div><h1>會議譯字幕</h1><div class="subtitle">手機收音 · 日英會議 → 繁體中文｜網頁測試版</div></div></div>
+<div class="pill" id="status">尚未開始</div>
+</header>
+<section class="card" aria-label="會議設定">
+<p class="card-head">01 ／ 會議設定</p>
+<div class="controls">
+<div class="field"><label for="language">現場發言語言</label>
+<select id="language"><option value="ja-JP">🇯🇵 日文</option><option value="en-US">🇺🇸 英文（國際）</option><option value="en-GB">🇬🇧 英文（英式）</option><option value="de-DE">🇩🇪 德文</option><option value="fr-FR">🇫🇷 法文</option></select>
+</div>
+<div class="field"><label for="translateMode">翻譯方式</label>
+<select id="translateMode"><option value="cloud">線上即時翻譯（試用）</option><option value="none">僅辨識原文，不翻譯</option><option value="own">自有 LibreTranslate 伺服器</option></select>
+</div>
+</div>
+<div id="ownConfig" hidden>
+<div class="field" style="margin-top:12px"><label for="ownUrl">公司自行管理的 LibreTranslate 端點（HTTPS）</label>
+<input type="url" id="ownUrl" placeholder="https://translate.example.com/translate" autocomplete="off"></div>
+<div class="field" style="margin-top:10px"><label for="ownKey">API 金鑰（可留空、不會儲存）</label><input type="text" id="ownKey" placeholder="若服務需要才填寫" autocomplete="off"></div>
+</div>
+<p class="note" id="modeExplain">試用服務：MyMemory。逐句翻譯，免費額度有限，不能保證長時間會議使用；翻譯內容會交給外部服務處理。</p>
+<label class="consent"><input type="checkbox" id="consent"><span><strong>我了解資料傳送風險，並同意啟用。</strong> Chrome 網頁語音辨識可能將會議音訊傳到瀏覽器服務商；選用線上翻譯還會將辨識文字傳送到翻譯服務。請勿用於公司機密或未授權的會議。</span></label>
+<div class="buttons">
+<button class="primary" id="startBtn">🎙 開始聆聽翻譯</button>
+<button id="stopBtn" disabled>■ 停止收音</button>
+</div>
+<div class="indicators"><span><span id="micdot" class="micdot"></span><span id="micState">麥克風未啟動</span></span><span>時間：<span id="elapsed">00:00</span></span><span id="segments">0 句</span></div>
+</section>
+<section class="hero" aria-label="最新翻譯">
+<div class="hero-top"><strong>02 ／ 最新繁體中文字幕</strong><div class="fontbuttons"><button id="smaller" aria-label="縮小字體">A−</button><button id="bigger" aria-label="放大字體">A＋</button></div></div>
+<div><div id="latestTranslation">等待會議開始…</div><div id="latestOriginal" class="original">請選擇語言，勾選資料風險說明後開始收音。</div></div>
+<div class="interim" id="interim" aria-live="polite"></div>
+</section>
+<div id="message" role="status" aria-live="polite">使用方式：把手機放在會議桌上，開啟 Chrome，保持此頁在前景。翻譯通常在發言停頓、辨識成句後顯示。</div>
+<section class="card">
+<div class="history-head">
+<p class="card-head" style="margin:0">03 ／ 逐句對照紀錄</p>
+<div class="history-actions"><button class="small" id="exportBtn">↓ 匯出 TXT</button><button class="small" id="clearBtn">清除</button></div>
+</div>
+<div id="history"><div class="empty" id="empty">尚無會議內容</div></div>
+</section>
+<section class="card">
+<details><summary>無法收音？先測試翻譯服務／輸入一段文字</summary>
+<div class="testrow"><input id="manualText" type="text" placeholder="例如：本日の納期について説明します" autocomplete="off"><button id="translateTest" class="small">翻譯測試</button></div>
+<p class="note">手動測試不會啟動麥克風；若選擇線上翻譯，輸入的文字仍會傳送到第三方服務，須先勾選上方同意框。</p>
+</details>
+</section>
+<p class="foot">⚠ 本站為功能原型，並非受稽核的離線保密翻譯工具。無帳號、無廣告、無本站後端；本站不會主動上傳紀錄，但瀏覽器辨識及你選定的翻譯服務可能處理音訊或文字。紀錄只保存在目前頁面記憶體，重新整理後會消失。瀏覽器限制可能導致中斷或漏句，數字、價格、否定詞請再向發言者確認。</p>
+</main>
+<script>
+(function(){
+"use strict";
+const $ = id=>document.getElementById(id);
+const SR=window.SpeechRecognition||window.webkitSpeechRecognition;
+const langMap={"ja-JP":"ja","en-US":"en","en-GB":"en","de-DE":"de","fr-FR":"fr"};
+let recog=null, active=false, starting=false, timer=null, wakeLock=null, started=0, restartTimer=null, restartFailures=0, seq=0, fontLarge=false, session=0;
+const records=[], translationQueue=[]; let translating=false;
+const MAX_RECORDS=300;
+function status(t,online){$("status").textContent=t;$("status").classList.toggle("active",!!online)}
+function notice(t,error){$("message").textContent=t;$("message").classList.toggle("error",!!error)}
+function elapsed(){const seconds=Math.max(0,Math.floor((Date.now()-started)/1000));$("elapsed").textContent=String(Math.floor(seconds/60)).padStart(2,"0")+":"+String(seconds%60).padStart(2,"0")}
+function ui(){ $("startBtn").disabled=active;$("stopBtn").disabled=!active;$("language").disabled=active;$("translateMode").disabled=active;$("micdot").classList.toggle("live",active);$("micState").textContent=active?"聆聽中（可能有短暫空窗）":"麥克風未啟動";$("segments").textContent=records.length+" 句"; }
+function formatTime(){return new Date().toLocaleTimeString("zh-TW",{hour12:false})}
+function viewLatest(original,translated){$("latestOriginal").textContent=original||"—";$("latestTranslation").textContent=translated||"等待翻譯…"}
+function safeHead(s){return (s||"").slice(0,40)}
+function renderHistory(){
+const root=$("history");root.replaceChildren();
+if(!records.length){const empty=document.createElement("div");empty.className="empty";empty.textContent="尚無會議內容";root.append(empty);return}
+for(const r of records.slice().reverse()){
+const item=document.createElement("div");item.className="item";
+const time=document.createElement("div");time.className="time";time.textContent=r.time+" · "+r.language;
+const src=document.createElement("div");src.className="src";src.textContent=r.original;
+const dst=document.createElement("div");dst.className="dst"+(r.pending?" pending":"");dst.textContent=r.translation;
+item.append(time,src,dst);root.append(item);
+}
+}
+function addRecord(original,label){
+const r={id:++seq,original,translation:$("translateMode").value==="none"?"（僅辨識原文）":"翻譯處理中…",pending:$("translateMode").value!=="none",time:formatTime(),language:label,mode:$("translateMode").value,sourceLang:langMap[$("language").value],run:session};
+records.push(r);if(records.length>MAX_RECORDS)records.shift();
+viewLatest(original,r.translation);renderHistory();ui();return r
+}
+const utf8size=s=>new TextEncoder().encode(s).length;
+function chunks(text){const parts=[];let piece="";for(const c of text){if(utf8size(piece+c)>440){if(piece)parts.push(piece);piece=""}piece+=c;if(utf8size(piece)>220&&/[。！？.!?\n]/.test(c)){parts.push(piece);piece=""}}if(piece)parts.push(piece);return parts}
+async function translateChunk(text,mode,source){
+if(mode==="none")return "（僅辨識原文）";
+let response;
+const ctrl=new AbortController();const timeout=setTimeout(()=>ctrl.abort(),15000);
+try{
+if(mode==="cloud"){
+const url="https://api.mymemory.translated.net/get?q="+encodeURIComponent(text)+"&langpair="+encodeURIComponent(source+"|zh-TW");
+response=await fetch(url,{signal:ctrl.signal,cache:"no-store"});
+if(!response.ok)throw new Error("HTTP "+response.status);
+const data=await response.json();
+if(data.responseStatus!==200||!data.responseData||!data.responseData.translatedText)throw new Error(data.responseDetails||"雲端翻譯額度或語系不支援");
+if(data.quotaFinished)throw new Error("今日免費翻譯額度已用完");
+return String(data.responseData.translatedText).replace(/&#(\d+);/g,(_,n)=>String.fromCodePoint(Number(n))).replace(/&amp;/g,"&").replace(/&quot;/g,'"').replace(/&#39;/g,"'");
+}
+const url=$("ownUrl").value.trim();
+if(!/^https:\/\//i.test(url))throw new Error("請填寫 HTTPS 翻譯端點");
+const payload={q:text,source,target:"zh",format:"text"};if($("ownKey").value.trim())payload.api_key=$("ownKey").value.trim();
+response=await fetch(url,{method:"POST",mode:"cors",headers:{"Content-Type":"application/json"},body:JSON.stringify(payload),signal:ctrl.signal});
+if(!response.ok)throw new Error("HTTP "+response.status);
+const data=await response.json();
+if(!data.translatedText)throw new Error("伺服器未傳回翻譯文字");
+return data.translatedText;
+}finally{clearTimeout(timeout)}
+}
+function queueTranslation(record){translationQueue.push(record);workQueue()}
+async function workQueue(){
+if(translating)return;translating=true;
+while(translationQueue.length){
+const r=translationQueue.shift();
+try{
+const parts=chunks(r.original);const translated=[];
+for(const c of parts)translated.push(await translateChunk(c,r.mode,r.sourceLang));
+r.translation=translated.join(" ");r.pending=false;
+}catch(err){r.pending=false;r.translation="⚠ 翻譯失敗："+(err.name==="AbortError"?"連線逾時":String(err.message||err));notice(r.translation,true)}
+if(records.some(x=>x.id===r.id)){renderHistory();if(records.at(-1).id===r.id)viewLatest(r.original,r.translation)}
+}
+translating=false;
+}
+async function keepAwake(){try{if("wakeLock" in navigator)wakeLock=await navigator.wakeLock.request("screen")}catch(_){}}
+async function releaseAwake(){try{if(wakeLock)await wakeLock.release()}catch(_){}wakeLock=null}
+function stop(){
+active=false;starting=false;clearTimeout(restartTimer);clearInterval(timer);timer=null;
+try{if(recog)recog.stop()}catch(_){}recog=null;releaseAwake();
+$("interim").textContent="";ui();status("已停止",false);notice("已停止收音。字幕仍可匯出，翻譯中的最後幾句會繼續處理。",false)
+}
+function onFail(err){
+const reason=err.error||"unknown";
+if(["not-allowed","service-not-allowed","audio-capture","language-not-supported"].includes(reason)){
+stop();notice("無法使用麥克風（"+reason+"）。請檢查瀏覽器權限、系統麥克風及語言支援。",true);
+}else if(reason!=="no-speech"&&reason!=="aborted"){
+restartFailures++;
+notice("辨識暫時中斷（"+reason+"），正在嘗試恢復。若網路不穩，可能漏句。",true);
+if(restartFailures>5){stop();notice("連續多次辨識失敗，已停止。請檢查網路及語音服務。",true)}
+}
+}
+function makeRecognizer(){
+recog=new SR();recog.lang=$("language").value;recog.continuous=true;recog.interimResults=true;recog.maxAlternatives=1;
+let seen=new Set();
+recog.onstart=()=>{starting=false;restartFailures=0;status("正在聆聽",true);$("micState").textContent="已連接麥克風"};
+recog.onresult=(event)=>{
+let interim="";
+for(let i=event.resultIndex;i<event.results.length;i++){
+const res=event.results[i];const text=(res[0]&&res[0].transcript||"").trim();
+if(!text)continue;
+if(res.isFinal){if(!seen.has(i)){seen.add(i);const r=addRecord(text,$("language").selectedOptions[0].text);if(r.pending)queueTranslation(r)}}
+else interim+=text+" ";
+}
+$("interim").textContent=interim?"辨識中："+interim:"";
+};
+recog.onerror=onFail;
+recog.onend=()=>{
+starting=false;if(!active)return;
+status("重新連線中",false);
+clearTimeout(restartTimer);
+restartTimer=setTimeout(()=>{
+if(!active)return;
+try{recog.start();starting=true}catch(err){restartFailures++;if(restartFailures>5){stop();notice("語音辨識無法持續重啟，請重新按開始。",true)}else{notice("語音辨識重啟中，可能漏掉短暫發言。",true);recog.onend()}}
+},550);
+};
+}
+async function start(){
+if(active||starting)return;
+if(!SR){notice("這個瀏覽器沒有提供網頁語音辨識。請用 Android Chrome 開啟；若仍無法使用，表示此手機瀏覽器不支援。",true);return}
+if(!$("consent").checked){notice("請先閱讀並勾選資料傳送風險同意框。公司機密會議請勿使用此雲端測試版。",true);return}
+if($("translateMode").value==="own"&&!/^https:\/\//i.test($("ownUrl").value.trim())){notice("請先輸入自有翻譯伺服器的 HTTPS 網址。",true);return}
+if(!window.isSecureContext){notice("麥克風功能需要 HTTPS 安全網址，請使用 GitHub Pages 正式網址。",true);return}
+session++;active=true;started=Date.now();ui();status("連接麥克風中",false);$("elapsed").textContent="00:00";timer=setInterval(elapsed,1000);
+try{makeRecognizer();recog.start();starting=true;keepAwake();notice("已啟動語音辨識。請保持 Chrome 畫面開啟，說話停頓後才可能顯示整句翻譯。",false)}
+catch(err){stop();notice("啟動失敗："+String(err.message||err),true)}
+}
+$("startBtn").addEventListener("click",start);
+$("stopBtn").addEventListener("click",stop);
+$("translateMode").addEventListener("change",()=>{
+$("ownConfig").hidden=$("translateMode").value!=="own";
+$("modeExplain").textContent=$("translateMode").value==="cloud"?"試用服務：MyMemory。逐句翻譯，免費額度有限；翻譯內容會交給外部服務處理。":$("translateMode").value==="own"?"只向你指定的 HTTPS 翻譯端點傳送文字；仍須注意瀏覽器辨識可能連線到外部語音服務。":"只顯示辨識原文；瀏覽器語音辨識仍可能使用雲端。";
+});
+$("bigger").addEventListener("click",()=>{$("latestTranslation").classList.add("lg");fontLarge=true});
+$("smaller").addEventListener("click",()=>{$("latestTranslation").classList.remove("lg");fontLarge=false});
+$("clearBtn").addEventListener("click",()=>{if(!records.length)return;if(!confirm("確定清除目前頁面的全部逐句紀錄？"))return;records.splice(0);translationQueue.splice(0);renderHistory();viewLatest("—","紀錄已清除");ui()});
+$("exportBtn").addEventListener("click",()=>{
+if(!records.length){notice("還沒有可匯出的會議內容。",true);return}
+const text=["會議譯字幕｜逐句文字紀錄","匯出時間："+new Date().toLocaleString("zh-TW"),"注意：自動辨識與翻譯可能有誤，重要數據請核對。",""].concat(records.flatMap(r=>["["+r.time+"] "+r.language,"原文："+r.original,"繁中："+r.translation,""])).join("\r\n");
+const blob=new Blob(["\uFEFF",text],{type:"text/plain;charset=utf-8"});const u=URL.createObjectURL(blob);const a=document.createElement("a");a.href=u;a.download="會議翻譯_"+new Date().toISOString().slice(0,10)+".txt";document.body.append(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(u),1200)
+});
+$("translateTest").addEventListener("click",()=>{
+const text=$("manualText").value.trim();
+if(!text){notice("請先輸入一段要測試的文字。",true);return}
+if(!$("consent").checked&&$("translateMode").value!=="none"){notice("文字會發送到翻譯服務，請先勾選風險同意框。",true);return}
+const r=addRecord(text,"手動測試｜"+$("language").selectedOptions[0].text);
+if(r.pending)queueTranslation(r);notice("已加入文字測試，完成後會顯示翻譯結果。",false)
+});
+document.addEventListener("visibilitychange",()=>{if(document.visibilityState==="visible"&&active)keepAwake()});
+window.addEventListener("beforeunload",()=>{active=false;try{if(recog)recog.abort()}catch(_){}});
+if(!SR)notice("目前瀏覽器不支援 SpeechRecognition。請以 Android Chrome 開啟；不支援時可先使用下方文字測試。",true);
+renderHistory();ui();
+})();
+</script>
+</body>
+</html>
