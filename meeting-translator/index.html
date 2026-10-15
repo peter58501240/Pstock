@@ -57,15 +57,17 @@ footer{display:none}
 <summary>⚙ 會議語言與翻譯設定（開始後自動收合）</summary>
 <div class="settings">
 <div class="twocol">
+<label class="field">聲音來源<select id="audioSource"><option value="microphone">麥克風（實體會議室）</option><option value="computer">電腦音訊（Teams）</option></select></label>
 <label class="field">現場發言語言<select id="language"><option value="ja-JP">🇯🇵 日文</option><option value="en-US">🇺🇸 英文（國際）</option><option value="en-GB">🇬🇧 英文（英式）</option><option value="de-DE">🇩🇪 德文</option><option value="fr-FR">🇫🇷 法文</option></select></label>
 <label class="field">翻譯來源<select id="mode"><option value="cloud">線上試用翻譯</option><option value="own">公司自有翻譯伺服器</option><option value="none">僅顯示原文（測試）</option></select></label>
 </div>
+<p class="tip" id="audioSourceInfo">手機放在會議桌上，透過麥克風辨識現場發言。</p>
 <div id="customFields" hidden>
 <label class="field">LibreTranslate HTTPS 端點<input id="endpoint" type="url" autocomplete="off" placeholder="https://example.com/translate"></label>
 <label class="field" style="margin-top:8px">API 金鑰（不會儲存）<input id="apiKey" type="text" autocomplete="off" placeholder="若有需要才填寫"></label>
 </div>
 <p class="tip" id="modeInfo">線上試用採用 MyMemory 免費服務，翻譯文字會送到外部伺服器。免費額度有限，長時間會議可能用完或被限速，無法保證整場持續有中文翻譯。</p>
-<label class="agree"><input type="checkbox" id="consent"><span>我了解資料傳送風險。Android Chrome 的網頁語音辨識可能將音訊送至瀏覽器服務商，線上試用翻譯會再傳送文字。這不是離線保密工具，不用於機密或未經授權的會議。</span></label>
+<label class="agree"><input type="checkbox" id="consent"><span>我了解資料傳送風險。Chrome 的網頁語音辨識可能將音訊送至瀏覽器服務商，線上試用翻譯會再傳送文字。這不是離線保密工具，不用於機密或未經授權的會議。</span></label>
 </div>
 </details>
 <main class="workspace">
@@ -87,7 +89,7 @@ const SpeechEngine=window.SpeechRecognition||window.webkitSpeechRecognition;
 const codes={"ja-JP":"ja","en-US":"en","en-GB":"en","de-DE":"de","fr-FR":"fr"};
 let running=false, recog=null, generation=0, connecting=false, listening=false, restartTimeout=null, reconnectionCount=0, ticker=null, startedAt=0, wakeLock=null;
 let queue=[], queueBusy=false, currentSource="", partialSource="", partialTimer=null, lastPreviewTime=0, lastPreviewSource="", previewVersion=0, partialFailures=0, translatedCount=0;
-let fontLarge=false;
+let fontLarge=false, captureStream=null, capturedTrack=null, preparingCapture=false, meterContext=null, meterTimer=null, meterAnalyser=null;
 const MAX_PREVIEW_REQUEST_BYTES=410;
 const utf8size=s=>new TextEncoder().encode(s).length;
 function clock(){
@@ -120,8 +122,49 @@ $("translationBusy").textContent="等待發言";
 }
 function updateLanguageLabel(){const label=$("language").selectedOptions[0].textContent;$("sourceLabel").textContent=label+"原文"}
 function syncControls(){
-$("startBtn").disabled=running;$("stopBtn").disabled=!running;$("language").disabled=running;$("mode").disabled=running;$("endpoint").disabled=running;$("apiKey").disabled=running;
-$("micStatus").textContent=listening?"收音中":running?"重新連接中":"麥克風已關閉";
+$("startBtn").disabled=running||preparingCapture;$("stopBtn").disabled=!running;$("language").disabled=running||preparingCapture;$("mode").disabled=running||preparingCapture;$("audioSource").disabled=running||preparingCapture;$("endpoint").disabled=running||preparingCapture;$("apiKey").disabled=running||preparingCapture;
+$("micStatus").textContent=listening?(capturedTrack?"電腦聲音擷取中":"麥克風收音中"):preparingCapture?"選取音訊來源中":running?"語音辨識重連中":"收音已停止";
+}
+function releaseCapture(){
+if(meterTimer){clearInterval(meterTimer);meterTimer=null}
+if(meterContext){meterContext.close().catch(()=>{});meterContext=null}
+meterAnalyser=null;
+const s=captureStream;captureStream=null;capturedTrack=null;
+if(s)for(const t of s.getTracks())try{t.stop()}catch(_){}
+}
+function meterCapture(track){
+try{
+const AudioCtx=window.AudioContext||window.webkitAudioContext;
+if(!AudioCtx)return;
+meterContext=new AudioCtx();
+const stream=new MediaStream([track]);const input=meterContext.createMediaStreamSource(stream);
+meterAnalyser=meterContext.createAnalyser();meterAnalyser.fftSize=1024;
+input.connect(meterAnalyser);
+const data=new Uint8Array(meterAnalyser.fftSize);
+meterTimer=setInterval(()=>{
+if(!capturedTrack||!listening)return;
+meterAnalyser.getByteTimeDomainData(data);
+let power=0;for(const n of data){const f=(n-128)/128;power+=f*f}
+const rms=Math.sqrt(power/data.length);
+$("micStatus").textContent=rms>.012?"接收到 Teams 聲音":"等待 Teams 發言…";
+},500);
+}catch(_){}
+}
+async function selectComputerAudio(){
+if(!navigator.mediaDevices||!navigator.mediaDevices.getDisplayMedia)throw new Error("此瀏覽器沒有支援電腦音訊擷取功能");
+const stream=await navigator.mediaDevices.getDisplayMedia({
+video:{displaySurface:"browser"},
+audio:{suppressLocalAudioPlayback:true},
+systemAudio:"include",
+selfBrowserSurface:"exclude",
+surfaceSwitching:"include"
+});
+const track=stream.getAudioTracks()[0];
+if(!track||track.readyState!=="live"){
+for(const t of stream.getTracks())try{t.stop()}catch(_){}
+throw new Error("沒有取得音訊。請重新選擇 Teams 分頁並勾選分享分頁音訊；桌面版 Teams 請選整個螢幕並開啟分享系統音訊。");
+}
+return {stream,track,surface:stream.getVideoTracks()[0]?.getSettings()?.displaySurface||"unknown"};
 }
 function splitForProvider(raw){
 const out=[];let current="";
@@ -236,7 +279,7 @@ if(!SpeechEngine){finish();msg("瀏覽器沒有語音辨識功能。請使用 An
 const run=generation;
 const r=new SpeechEngine(),seen=new Set();recog=r;connecting=true;
 r.lang=$("language").value;r.continuous=true;r.interimResults=true;r.maxAlternatives=1;
-r.onstart=()=>{if(!running||run!==generation){try{r.stop()}catch(_){}return}listening=true;connecting=false;reconnectionCount=0;state("持續聆聽",true);syncControls();msg("持續顯示中。請保持螢幕亮起及 Chrome 在前景，語音辨識可能短暫重連。",false)};
+r.onstart=()=>{if(!running||run!==generation){try{r.stop()}catch(_){}return}listening=true;connecting=false;reconnectionCount=0;state("持續聆聽",true);syncControls();msg(capturedTrack?"正在讀取 Teams 電腦音訊。Chrome 會嘗試關閉被擷取分頁的本機播放聲音；仍請留意是否發出聲音。":"正在收取麥克風聲音，請保持此頁開啟。",false)};
 r.onresult=event=>captureResults(event,run,seen);
 r.onerror=event=>{
 if(!running||run!==generation)return;
@@ -251,31 +294,63 @@ reconnectionCount++;state("重連中",false);
 if(reconnectionCount>12){finish();msg("語音服務已連續多次中斷，必須重新按開始。網頁無法保證無間斷收音。",true);return}
 scheduleRestart();
 };
-try{r.start()}catch(e){connecting=false;reconnectionCount++;if(reconnectionCount>12){finish();msg("無法重新啟動語音辨識："+String(e.message||e),true)}else scheduleRestart()}
+try{
+if(capturedTrack){
+if(capturedTrack.readyState!=="live"){finish();msg("Teams 音訊擷取已中止，需要重新選擇來源。",true);return}
+r.start(capturedTrack);
+}else r.start();
+}catch(e){connecting=false;reconnectionCount++;if(reconnectionCount>12||capturedTrack&&e.name==="InvalidStateError"){finish();msg("無法使用所選電腦音訊進行辨識："+String(e.message||e),true)}else scheduleRestart()}
 }
 async function requestWake(){try{if(document.visibilityState==="visible"&&"wakeLock" in navigator)wakeLock=await navigator.wakeLock.request("screen")}catch(_){}}
 function releaseWake(){const w=wakeLock;wakeLock=null;if(w)w.release().catch(()=>{})}
 function finish(){
 if(!running)return;
 running=false;generation++;listening=false;connecting=false;
-clearTimeout(restartTimeout);restartTimeout=null;clearInterval(ticker);ticker=null;clearInterim();
+clearTimeout(restartTimeout);restartTimeout=null;clearInterval(ticker);ticker=null;clearInterim();releaseCapture();
 const r=recog;recog=null;if(r)try{r.stop()}catch(_){}
 releaseWake();syncControls();state("已結束",false);$("translationBusy").textContent=queueBusy?"最後一段翻譯處理中":"已結束";
 $("settings").open=false;
 }
-function start(){
-if(running)return;
-if(!SpeechEngine){msg("Chrome 不支援 Web Speech Recognition，無法開始語音轉文字。",true);return}
-if(!window.isSecureContext){msg("需要 HTTPS 才能啟動麥克風。",true);return}
+async function start(){
+if(running||preparingCapture)return;
+if(!SpeechEngine){msg("Chrome 不支援語音辨識，無法開始。請使用 Windows Chrome 135 或更新版本。",true);return}
+if(!window.isSecureContext){msg("需要 HTTPS 才能使用語音辨識或音訊擷取。",true);return}
 if(!$("consent").checked){msg("請先勾選設定內的資料風險同意，再開始翻譯。",true);$("settings").open=true;return}
 if($("mode").value==="own"&&!/^https:\/\//i.test($("endpoint").value.trim())){msg("請填寫 HTTPS 自有翻譯伺服器網址。",true);$("settings").open=true;return}
+const fromComputer=$("audioSource").value==="computer";
+if(fromComputer){
+preparingCapture=true;syncControls();state("選擇音訊中",false);
+try{
+const selected=await selectComputerAudio();
+captureStream=selected.stream;capturedTrack=selected.track;
+const mode=selected.surface;
+if(mode==="window")msg("已選視窗音訊。提醒：Teams 桌面版的「視窗音訊」可能是靜音，建議改用整個螢幕及分享系統音訊。",true);
+else msg("電腦音訊已連接。請確認原文視窗有辨識結果。",false);
+}catch(e){
+preparingCapture=false;syncControls();state("待命",false);
+msg("音訊擷取未啟動："+String(e.message||e),true);
+return
+}
+preparingCapture=false;
+}
 generation++;running=true;listening=false;connecting=false;reconnectionCount=0;startedAt=Date.now();clock();clearInterval(ticker);ticker=setInterval(clock,1000);resetView();updateLanguageLabel();syncControls();state("啟動中",false);$("settings").open=false;
+if(captureStream){
+const current=captureStream;
+for(const t of current.getVideoTracks())t.addEventListener("ended",()=>{if(running&&captureStream===current){finish();msg("你已停止分享 Teams 音訊，翻譯同步結束。",true)}});
+capturedTrack.addEventListener("ended",()=>{if(running&&captureStream===current){finish();msg("Teams 音訊來源已停止，請重新開始。",true)}});
+meterCapture(capturedTrack);
+}
 openRecognition();requestWake();
 }
 $("startBtn").addEventListener("click",start);
 $("stopBtn").addEventListener("click",()=>{finish();msg("會議已結束。沒有儲存對話紀錄；重新開始會清空目前畫面。",false)});
 $("sizeBtn").addEventListener("click",()=>{fontLarge=!fontLarge;$("zhText").classList.toggle("large",fontLarge);$("zhPreview").classList.toggle("large",fontLarge);$("sizeBtn").textContent=fontLarge?"字 A−":"字 A+"});
 $("language").addEventListener("change",updateLanguageLabel);
+$("audioSource").addEventListener("change",()=>{
+const pc=$("audioSource").value==="computer";
+$("audioSourceInfo").textContent=pc?"電腦 Teams 建議使用 Chrome 網頁版：分享 Teams 分頁並勾選「分享分頁音訊」。若使用 Teams 桌面程式，請選「整個螢幕」並勾選「分享系統音訊」，但不保證在電腦靜音下仍有可擷取聲音。請先把 Teams 麥克風關閉。":"手機或電腦使用麥克風收音，適合現場會議。";
+});
+
 $("mode").addEventListener("change",()=>{
 const mode=$("mode").value;$("customFields").hidden=mode!=="own";
 $("modeInfo").textContent=mode==="cloud"?"線上試用採用 MyMemory 免費服務，翻譯文字會送到外部伺服器。免費額度有限，長時間會議可能用完或被限速，無法保證整場持續有中文翻譯。":mode==="own"?"只會把辨識文字送到你填寫的伺服器，但 Chrome 語音辨識本身仍可能使用外部服務。":"只顯示原文，暫不送到翻譯服務；Chrome 語音辨識本身仍可能使用外部服務。";
@@ -284,7 +359,7 @@ document.addEventListener("visibilitychange",()=>{
 if(document.visibilityState==="visible"){if(running){requestWake();if(!listening&&!connecting)scheduleRestart()}}
 else if(running)msg("注意：畫面切到背景可能導致麥克風辨識中斷；請保持 Chrome 顯示。",true);
 });
-window.addEventListener("beforeunload",()=>{if(recog)try{recog.abort()}catch(_){}});
+window.addEventListener("beforeunload",()=>{if(recog)try{recog.abort()}catch(_){}releaseCapture()});
 updateLanguageLabel();syncControls();
 if(!SpeechEngine)msg("這個瀏覽器不支援網頁語音辨識；請從 Chrome 瀏覽器開啟。",true);
 })();
