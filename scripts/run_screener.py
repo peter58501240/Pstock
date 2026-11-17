@@ -229,8 +229,10 @@ def fetch_yahoo(stock):
             bars.append([day, round(o, 4), round(h, 4), round(lo, 4), round(c, 4), int(volume or 0)])
         except (IndexError, TypeError, ValueError):
             continue
-    if len(bars) < MIN_BARS:
-        raise ValueError("Yahoo K 線筆數不足")
+    # A recently listed stock can have a perfectly valid short history.
+    # Retain it and let later official daily bars accumulate until MIN_BARS.
+    if len(bars) < 2:
+        raise ValueError(f"有效日 K 僅 {len(bars)} 根，無法建立歷史序列")
     return bars[-260:]
 
 
@@ -292,7 +294,7 @@ def evaluate(stock, bars):
     reasons = []
     if c[-1] > ma20 and ma20_up and hist[-1] > 0 and (break3 or c[-1] >= ma10):
         group = "A"
-        reasons = ["站上上揚 MA20", "MACD 動能為正", "維持相對強勢結構"]
+        reasons = ["站上上揚 MA20", "MACD 動能為正", "維持短線趨勢結構"]
     elif c[-1] > ma5 and c[-1] > ma10 and recovery and structure_good and (break3 or ret5 > 2):
         group = "B"
         reasons = ["收復 MA5／MA10", "MACD 柱狀體連續改善", "低點結構改善"]
@@ -309,6 +311,16 @@ def evaluate(stock, bars):
     stop_pct = (c[-1] - stop) / c[-1]*100 if 0 < stop < c[-1] else None
     momentum = "剛翻正" if hist[-1] > 0 and hist[-2] <= 0 else ("正值" if hist[-1] > 0 else "改善中")
     bb_expanding = width > old_width
+    sigma = statistics.pstdev(c[-20:])
+    old_sigma = statistics.pstdev(c[-21:-1])
+    bb_true_open = (bb_expanding
+                    and mid + 2*sigma > old_mid + 2*old_sigma
+                    and mid - 2*sigma < old_mid - 2*old_sigma)
+    classic = {
+        "macd_flip": hist[-1] > 0 and hist[-2] <= 0,
+        "bb_true_open": bb_true_open,
+        "ma20_rising": c[-1] > ma20 and ma20 > old_mid
+    }
     if bb_expanding:
         reasons.append("布林帶寬擴大")
     return {
@@ -319,6 +331,8 @@ def evaluate(stock, bars):
         "ma60": round(ma60, 2), "dist_ma20": round(dist, 2),
         "macd": momentum, "macd_hist": round(hist[-1], 4),
         "bb_width": round(width, 2), "bb_expanding": bb_expanding,
+        "classic": classic, "classic_match_count": sum(classic.values()),
+        "classic_all_match": all(classic.values()),
         "breakout": break3, "stop": round(stop, 2) if stop_pct is not None else None,
         "stop_pct": round(stop_pct, 2) if stop_pct is not None else None,
         "resistance": round(max(h[-11:-1]), 2), "reasons": reasons,
@@ -360,7 +374,8 @@ def run():
     report = {"schema": 1, "updated_at": now.isoformat(timespec="seconds"),
               "market_date": None, "market_dates": {}, "status": "unavailable",
               "universe": 0, "eligible": 0, "history_ready": 0,
-              "scanned": 0, "candidates": [], "warnings": [], "errors": []}
+              "scanned": 0, "candidates": [], "insufficient_history": [],
+              "warnings": [], "errors": []}
     try:
         snapshots, dates, errors = fetch_snapshots()
         report["errors"].extend(errors)
@@ -380,7 +395,7 @@ def run():
         history = cache_read()
         # Priority: highly liquid names first, plus all prior successes.
         missing = [s for s in sorted(eligible, key=lambda s: -s["volume"]*s["close"])
-                   if len(history.get(s["code"], [])) < MIN_BARS]
+                   if not history.get(s["code"])]
         todo = missing[:max(0, MAX_BOOTSTRAP)]
         if todo:
             print(f"Bootstrapping {len(todo)} / {len(missing)} eligible histories", flush=True)
@@ -400,11 +415,18 @@ def run():
         market_returns = []
         for stock in eligible:
             bars = history.get(stock["code"], [])
-            if len(bars) < MIN_BARS:
+            if not bars:
                 continue
             bars = upsert_bar(bars, stock)
             history[stock["code"]] = bars
             if bars[-1][0] != trade_day:
+                continue
+            if len(bars) < MIN_BARS:
+                report["insufficient_history"].append({
+                    "code": stock["code"], "name": stock["name"],
+                    "available": len(bars), "required": MIN_BARS,
+                    "status": "資料累積中"
+                })
                 continue
             report["history_ready"] += 1
             if float(bars[-21][4]) > 0:
@@ -450,6 +472,29 @@ def self_test():
     evaluated = evaluate(stock, bars)
     assert evaluated is not None and evaluated["group"] == "A", evaluated
     assert rank_candidates([evaluated])[0]["score"] >= 0
+    assert set(evaluated["classic"]) == {"macd_flip", "bb_true_open", "ma20_rising"}
+    assert evaluated["classic_match_count"] == sum(evaluated["classic"].values())
+    # A newly listed security with valid <70 historical bars must be
+    # classified as waiting for history, not an API failure.
+    original_get_json = globals()["get_json"]
+    base_stamp = int(datetime(2026, 9, 3, tzinfo=TZ).timestamp())
+    mock = {"chart": {"result": [{
+        "timestamp": [base_stamp + i*86400 for i in range(50)],
+        "indicators": {"quote": [{
+            "open": [40.0 + i*.1 for i in range(50)],
+            "high": [40.8 + i*.1 for i in range(50)],
+            "low": [39.4 + i*.1 for i in range(50)],
+            "close": [40.2 + i*.1 for i in range(50)],
+            "volume": [1_100_000 for _ in range(50)]
+        }]}
+    }]}}
+    globals()["get_json"] = lambda url, **kwargs: mock
+    try:
+        short = fetch_yahoo({"code": "3718", "market": "上櫃"})
+    finally:
+        globals()["get_json"] = original_get_json
+    assert len(short) == 50
+    assert evaluate({"code": "3718", "date": short[-1][0], "name": "測試"}, short) is None
     print("SELF TEST PASS")
 
 

@@ -48,7 +48,8 @@ td:nth-child(8){grid-column:1 / 4}td:nth-child(9){grid-column:4;text-align:right
 <div class="wrap">
 <header>
   <div><a class="link" href="index.html">← Pstock 投資儀表板</a><h1>每日智慧選股</h1>
-  <p class="sub">上市＋上櫃普通股｜強勢續強／止跌轉強／潛力觀察｜收盤訊號、隔日研究</p></div>
+  <p class="sub">上市＋上櫃普通股｜強勢續強／止跌轉強／潛力觀察｜收盤訊號、隔日研究</p>
+  <p class="sub">當日收盤資料：證交所／櫃買中心｜歷史 K 線：Yahoo Finance，當日以官方行情校正</p></div>
   <button class="chip" id="refresh">重新讀取資料</button>
 </header>
 <div class="statgrid">
@@ -74,10 +75,11 @@ td:nth-child(8){grid-column:1 / 4}td:nth-child(9){grid-column:4;text-align:right
 </table><div id="empty" class="empty" hidden>此類別目前沒有候選股票。</div></div>
 <h2>三個觀察池代表什麼？</h2>
 <div class="rules">
-  <div class="rule"><strong>A｜強勢續強</strong><div>股價位於上揚 MA20 之上，MACD 動能為正，尋找仍有趨勢的個股。</div></div>
+  <div class="rule"><strong>A｜強勢續強</strong><div>股價位於上揚 MA20 之上，MACD 動能為正，尋找仍有趨勢的個股。A 類不保證符合原始三條件。</div></div>
   <div class="rule"><strong>B｜止跌轉強</strong><div>率先站回 MA5／MA10，MACD 柱狀體持續改善，低點結構開始修復。</div></div>
   <div class="rule"><strong>C｜潛力觀察</strong><div>動能與價格開始穩定，但尚未形成確認買點；不可當成買進訊號。</div></div>
 </div>
+<p class="foot">「原策略 x/3」分別檢驗：①MACD 柱狀體今天由負翻正，②布林通道帶寬擴大且上軌升、下軌降，③股價站上今天上揚的 MA20。這是原網友策略的額外檢核，不是 A／B／C 入選條件。</p>
 <p class="foot">篩選規則為實驗性研究版，尚未完成歷史回測。分數代表各候選的相對排序，不是獲利機率。資料由盤後程式計算；如行情日期不同步或歷史資料未齊，頁面會揭露缺口。停損線只是技術參考，跳空可能無法以該價格成交。</p>
 </div>
 <script>
@@ -100,6 +102,9 @@ function paint(){
   if(p.status!=="ready"){
     box.append(notice(p.status==="partial"?"部分資料就緒：結果只涵蓋已完成掃描的股票，請勿視為全市場完整排名。":"選股資料尚未就緒；請查閱資料錯誤或執行紀錄。","warn"));
   } else box.append(notice("已完成全市場盤後掃描。請依你的交易計畫自行判斷是否進場。"));
+  for(const x of (p.insufficient_history||[]).slice(0,5)){
+    box.append(notice(x.code+" "+x.name+"：目前只有 "+x.available+"/"+x.required+" 根有效日 K；資料累積中，暫不參與完整策略評分。"));
+  }
   for(const m of (p.warnings||[]).slice(0,5))box.append(notice(m,"warn"));
   for(const m of (p.errors||[]).slice(0,5))box.append(notice(m,"error"));
   const q=$("query").value.trim();
@@ -116,12 +121,16 @@ function paint(){
     tr.innerHTML=
       '<td data-label="股票"><div class="ticker">'+esc(x.name)+' <small>'+esc(x.code)+' · '+esc(x.market)+'</small></div></td>'+
       '<td data-label="階段"><span class="group '+esc(x.group)+'">'+esc(x.group)+'</span></td>'+
-      '<td data-label="綜合分數"><span class="score">'+esc(x.score)+'</span></td>'+
+      '<td data-label="綜合分數"><span class="score">'+esc(x.score)+'</span><div class="reason">原策略 '+(x.classic_match_count??"—")+'/3</div></td>'+
       '<td data-label="收盤／20 日"><span class="metric">'+fmt(x.close)+'</span><br><span class="'+pctCls+'">'+(x.ret20>0?"+":"")+fmt(x.ret20)+'%</span></td>'+
       '<td data-label="相對強弱">前 '+Math.max(1,100-Number(x.rs_percentile||0))+'%</td>'+
       '<td data-label="MA20 乖離">'+(x.dist_ma20>0?"+":"")+fmt(x.dist_ma20)+'%</td>'+
       '<td data-label="失敗參考線">'+(x.stop===null?"—":fmt(x.stop))+'<br><small>'+ (x.stop_pct===null?"—":"−"+fmt(x.stop_pct)+"%")+'</small></td>'+
-      '<td data-label="入選理由／狀態"><div class="reason">'+esc((x.reasons||[]).join("、"))+'</div><div class="state '+stateCls+'">'+esc(x.state||"觀察")+' · MACD '+esc(x.macd||"—")+'</div></td>'+
+      '<td data-label="入選理由／狀態"><div class="reason">'+esc((x.reasons||[]).join("、"))+'</div>'+
+      '<div class="reason">原策略：MACD翻正'+(x.classic?.macd_flip?"✓":"×")+
+      ' · 布林開口'+(x.classic?.bb_true_open?"✓":"×")+
+      ' · MA20上揚'+(x.classic?.ma20_rising?"✓":"×")+'</div>'+
+      '<div class="state '+stateCls+'">'+esc(x.state||"觀察")+' · MACD '+esc(x.macd||"—")+'</div></td>'+
       '<td data-label="深入圖表"><a class="link" href="index.html?stock='+encodeURIComponent(x.code)+'">分析圖表</a></td>';
     tbody.append(tr);
   }
