@@ -472,6 +472,29 @@ def self_test():
     evaluated = evaluate(stock, bars)
     assert evaluated is not None and evaluated["group"] == "A", evaluated
     assert rank_candidates([evaluated])[0]["score"] >= 0
+    assert set(evaluated["classic"]) == {"macd_flip", "bb_true_open", "ma20_rising"}
+    assert evaluated["classic_match_count"] == sum(evaluated["classic"].values())
+    # A newly listed security with valid <70 historical bars must be
+    # classified as waiting for history, not an API failure.
+    original_get_json = globals()["get_json"]
+    base_stamp = int(datetime(2026, 9, 3, tzinfo=TZ).timestamp())
+    mock = {"chart": {"result": [{
+        "timestamp": [base_stamp + i*86400 for i in range(50)],
+        "indicators": {"quote": [{
+            "open": [40.0 + i*.1 for i in range(50)],
+            "high": [40.8 + i*.1 for i in range(50)],
+            "low": [39.4 + i*.1 for i in range(50)],
+            "close": [40.2 + i*.1 for i in range(50)],
+            "volume": [1_100_000 for _ in range(50)]
+        }]}
+    }]}}
+    globals()["get_json"] = lambda url, **kwargs: mock
+    try:
+        short = fetch_yahoo({"code": "3718", "market": "上櫃"})
+    finally:
+        globals()["get_json"] = original_get_json
+    assert len(short) == 50
+    assert evaluate({"code": "3718", "date": short[-1][0], "name": "測試"}, short) is None
     print("SELF TEST PASS")
 
 
