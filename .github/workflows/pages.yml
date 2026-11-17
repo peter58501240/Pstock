@@ -2,7 +2,7 @@ name: Deploy Pstock to GitHub Pages
 
 on:
   push:
-    branches: ["main", "feature/daily-stock-screener-20261117"]
+    branches: ["main"]
   workflow_dispatch:
   schedule:
     # Taiwan market closes at 13:30. Scheduled jobs may run late.
@@ -34,14 +34,6 @@ jobs:
           python -c 'import re,pathlib; [pathlib.Path("/tmp/"+p.stem+".js").write_text(re.findall(r"<script[^>]*>(.*?)</script>",p.read_text(encoding="utf-8"),re.S)[-1],encoding="utf-8") for p in [pathlib.Path("index.html"),pathlib.Path("screener.html")]]'
           node --check /tmp/index.js
           node --check /tmp/screener.js
-      - name: Smoke-test official data and initial history (feature branch only)
-        if: github.ref != 'refs/heads/main'
-        env:
-          SCREENER_HISTORY_PATH: ${{ runner.temp }}/pstock-smoke-history.json.gz
-          SCREENER_BOOTSTRAP_LIMIT: "12"
-        run: |
-          python scripts/run_screener.py
-          python -c "import json; p=json.load(open('data/screener.json')); print('Official sources:',p['market_dates'],'Universe:',p['universe'],'History ready:',p['history_ready'],'Status:',p['status']); assert p['universe']>200,p['errors']"
   deploy:
     if: github.ref == 'refs/heads/main'
     needs: verify
