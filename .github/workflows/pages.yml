@@ -5,8 +5,10 @@ on:
     branches: ["main", "feature/daily-stock-screener-20261117"]
   workflow_dispatch:
   schedule:
-    # Taiwan market closes at 13:30. 06:10 UTC = 14:10 Asia/Taipei.
+    # Taiwan market closes at 13:30. Scheduled jobs may run late.
+    # 14:10 initial run; 15:35 retries if official TWSE feed was delayed.
     - cron: "10 6 * * 1-5"
+    - cron: "35 7 * * 1-5"
 
 permissions:
   contents: read
