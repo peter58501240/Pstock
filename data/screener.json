@@ -1,0 +1,16 @@
+{
+  "schema": 1,
+  "updated_at": null,
+  "market_date": null,
+  "market_dates": {},
+  "status": "unavailable",
+  "universe": 0,
+  "eligible": 0,
+  "history_ready": 0,
+  "scanned": 0,
+  "candidates": [],
+  "warnings": [
+    "選股資料尚未建立，等待首次 GitHub Actions 盤後執行。"
+  ],
+  "errors": []
+}
