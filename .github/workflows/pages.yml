@@ -5,8 +5,10 @@ on:
     branches: ["main"]
   workflow_dispatch:
   schedule:
-    # Taiwan market closes at 13:30. 06:10 UTC = 14:10 Asia/Taipei.
+    # Taiwan market closes at 13:30. Scheduled jobs may run late.
+    # 14:10 initial run; 15:35 retries if official TWSE feed was delayed.
     - cron: "10 6 * * 1-5"
+    - cron: "35 7 * * 1-5"
 
 permissions:
   contents: read
@@ -18,7 +20,23 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Check syntax and stock-scanner logic
+        run: |
+          python -m py_compile scripts/run_screener.py scripts/update_prices.py scripts/update_history.py
+          python scripts/run_screener.py --self-test
+          python -c 'import re,pathlib; [pathlib.Path("/tmp/"+p.stem+".js").write_text(re.findall(r"<script[^>]*>(.*?)</script>",p.read_text(encoding="utf-8"),re.S)[-1],encoding="utf-8") for p in [pathlib.Path("index.html"),pathlib.Path("screener.html")]]'
+          node --check /tmp/index.js
+          node --check /tmp/screener.js
   deploy:
+    if: github.ref == 'refs/heads/main'
+    needs: verify
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
@@ -39,6 +57,27 @@ jobs:
       - name: Fetch historical OHLCV for trendline analysis
         if: ${{ !contains(github.event.head_commit.message, '[skip-market-fetch]') }}
         run: python scripts/update_history.py
+
+      - name: Restore historical screener cache
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ runner.temp }}/pstock-screener-history.json.gz
+          key: pstock-market-history-v1-${{ github.run_id }}
+          restore-keys: |
+            pstock-market-history-v1-
+
+      - name: Build daily A/B/C stock screener
+        env:
+          SCREENER_HISTORY_PATH: ${{ runner.temp }}/pstock-screener-history.json.gz
+          SCREENER_BOOTSTRAP_LIMIT: "650"
+        run: python scripts/run_screener.py
+
+      - name: Save updated screener history
+        if: success()
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ runner.temp }}/pstock-screener-history.json.gz
+          key: pstock-market-history-v1-${{ github.run_id }}
 
       - name: Setup Pages
         uses: actions/configure-pages@v5

@@ -5,6 +5,7 @@ from datetime import datetime, timezone, timedelta
 from html.parser import HTMLParser
 from pathlib import Path
 from urllib.request import Request, urlopen
+from run_screener import fetch_twse_recent
 
 SYMBOLS = {
     # Current holdings
@@ -81,7 +82,7 @@ class TableParser(HTMLParser):
             self.row = []
 
 def fetch_twse():
-    url = "https://openapi.twse.com.tw/v1/exchangeReport/STOCK_DAY_AVG_ALL"
+    url = "https://openapi.twse.com.tw/v1/exchangeReport/STOCK_DAY_ALL"
     text = get_text(url)
     items = json.loads(text)
     out = {}
@@ -99,6 +100,21 @@ def fetch_twse():
             "source": "TWSE",
             "market_date": market_date,
         }
+    # STOCK_DAY_ALL occasionally publishes later than the official daily index
+    # market table. Keep today's newer close, including ETF tickers such as 0050.
+    try:
+        recent = fetch_twse_recent(include_etf=True)
+        for code in SYMBOLS:
+            item = recent.get(code)
+            if item and (code not in out or item["date"] > (out[code].get("market_date") or "")):
+                out[code] = {
+                    "close": item["close"],
+                    "name": item["name"],
+                    "source": "TWSE MI_INDEX",
+                    "market_date": item["date"],
+                }
+    except Exception as exc:
+        print(f"WARNING: TWSE MI_INDEX fallback: {exc}")
     return out
 
 def fetch_tpex():
@@ -150,10 +166,22 @@ def main():
         v.get("market_date") for v in merged.values() if v.get("market_date")
     })
     missing = sorted(SYMBOLS - set(merged))
+    # Never represent a mixed-date payload as if every stock is up to date.
+    stale_codes = sorted(
+        code for code, item in merged.items()
+        if found_dates and item.get("market_date") != found_dates[-1]
+    )
+    if stale_codes:
+        errors.append(
+            f"市場資料日期不一致：{len(stale_codes)} 檔仍停留較早日期，"
+            "可在網站開啟時嘗試即時報價"
+        )
 
     payload = {
         "updated_at": now.isoformat(timespec="seconds"),
-        "market_date": found_dates[-1] if found_dates else None,
+        "market_date": found_dates[0] if found_dates else None,
+        "latest_available_date": found_dates[-1] if found_dates else None,
+        "stale_codes": stale_codes,
         "prices": merged,
         "missing": missing,
         "errors": errors,
