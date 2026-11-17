@@ -104,6 +104,7 @@
     <button class="tab" data-tab="trend">切線分析</button>
     <button class="tab" data-tab="fib">費波那契</button>
     <button class="tab" data-tab="pattern">型態學分析</button>
+    <a class="tab" href="screener.html" style="text-decoration:none;display:inline-flex;align-items:center">🔎 智慧選股</a>
   </div>
 
   <section id="overview" class="section active">
@@ -325,7 +326,10 @@ document.querySelectorAll(".tab").forEach(b=>b.onclick=()=>{
   document.querySelectorAll(".section").forEach(x=>x.classList.remove("active"));
   b.classList.add("active");
   $(b.dataset.tab).classList.add("active");
-  if(b.dataset.tab==="trend") initTrendTab();
+  if(b.dataset.tab==="trend") initTrendTab().then(()=>{
+    const stock=new URLSearchParams(location.search).get("stock");
+    if(stock&&/^\d{4,6}$/.test(stock)) loadCustomTicker(stock,"trend").catch(e=>{$("trendStatus").textContent="載入失敗："+e.message;});
+  });
   if(b.dataset.tab==="fib") initFibTab();
   if(b.dataset.tab==="pattern") initPatternTab();
 });
@@ -3808,6 +3812,7 @@ $("refreshBtn").onclick=async()=>{await loadClosingFallback();await loadRealtime
 $("csvBtn").onclick=()=>{const rows=[["排名","代號","名稱","已賣股數","平均成本價","平均賣出價","最新價格","價格來源","已實現損益","報酬率"],...realized.map((r,i)=>{const lp=livePrices[r.code],p=pricePayload.prices?.[r.code],px=Number(lp?.close??p?.close);return [i+1,r.code,r.name,r.qty,r.buy,r.sell,Number.isFinite(px)?px:"",lp?"即時":(p?.source?"收盤":""),r.pnl,r.ret+"%"]})],csv="\ufeff"+rows.map(x=>x.join(",")).join("\n"),a=document.createElement("a");a.href=URL.createObjectURL(new Blob([csv],{type:"text/csv;charset=utf-8"}));a.download="Pstock-realized.csv";a.click();URL.revokeObjectURL(a.href)};
 bindHoldingsSort();
 loadClosingFallback().then(loadRealtime);
+if(new URLSearchParams(location.search).has("stock")) document.querySelector('[data-tab="trend"]').click();
 </script>
 </body>
 </html>
