@@ -326,10 +326,10 @@ def evaluate(stock, bars):
     }
 
 
-def rank_candidates(items):
+def rank_candidates(items, market_returns=None):
     if not items:
         return []
-    returns = sorted(x["_ret20"] for x in items)
+    returns = sorted(market_returns if market_returns else [x["_ret20"] for x in items])
     for item in items:
         pct_rank = sum(r <= item["_ret20"] for r in returns) / len(returns)
         rs_score = 30 * pct_rank
@@ -351,7 +351,7 @@ def rank_candidates(items):
     # Keep multiple groups so one market regime cannot hide all early candidates.
     result = []
     for group in "ABC":
-        result.extend([x for x in items if x["group"] == group][:15])
+        result.extend([x for x in items if x["group"] == group][:5])
     return sorted(result, key=lambda x: (-x["score"], x["code"]))
 
 
@@ -397,6 +397,7 @@ def run():
                             report["warnings"].append(f"{stock['code']} 歷史下載失敗：{exc}")
             print(f"Bootstrap failures: {failures}", flush=True)
         items = []
+        market_returns = []
         for stock in eligible:
             bars = history.get(stock["code"], [])
             if len(bars) < MIN_BARS:
@@ -406,12 +407,14 @@ def run():
             if bars[-1][0] != trade_day:
                 continue
             report["history_ready"] += 1
+            if float(bars[-21][4]) > 0:
+                market_returns.append((float(bars[-1][4])/float(bars[-21][4])-1)*100)
             evaluated = evaluate(stock, bars)
             if evaluated:
                 items.append(evaluated)
         cache_write(history)
         report["scanned"] = report["history_ready"]
-        report["candidates"] = rank_candidates(items)
+        report["candidates"] = rank_candidates(items, market_returns)
         fresh = len(dates) == 2 and all(x == trade_day for x in dates.values())
         coverage = report["history_ready"]/max(1, report["eligible"])
         if coverage < .95:
