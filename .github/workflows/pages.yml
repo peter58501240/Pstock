@@ -31,11 +31,20 @@ jobs:
           python-version: "3.12"
       - name: Check syntax and stock-scanner logic
         run: |
-          python -m py_compile scripts/run_screener.py scripts/update_prices.py scripts/update_history.py
+          python -m py_compile scripts/run_screener.py scripts/trade_quality.py scripts/update_prices.py scripts/update_history.py
+          python scripts/trade_quality.py
           python scripts/run_screener.py --self-test
           python -c 'import re,pathlib; [pathlib.Path("/tmp/"+p.stem+".js").write_text(re.findall(r"<script[^>]*>(.*?)</script>",p.read_text(encoding="utf-8"),re.S)[-1],encoding="utf-8") for p in [pathlib.Path("index.html"),pathlib.Path("screener.html")]]'
           node --check /tmp/index.js
           node --check /tmp/screener.js
+      - name: Smoke-test live market screener (PR only)
+        if: github.event_name == 'pull_request'
+        env:
+          SCREENER_HISTORY_PATH: ${{ runner.temp }}/screener-pr-smoke.json.gz
+          SCREENER_BOOTSTRAP_LIMIT: "20"
+        run: |
+          python scripts/run_screener.py
+          python -c 'import json; x=json.load(open("data/screener.json")); print("Universe",x["universe"],"Historic",x["history_ready"],"Classic",x["classic_total"],"Pool",len(x["candidates"])); assert x["universe"]>1000 and "classic_candidates" in x; assert all("quality_state" in r and "entry_type" in r and "stop_source" in r for r in x["candidates"]+x["classic_candidates"])'
   deploy:
     if: github.ref == 'refs/heads/main'
     needs: verify

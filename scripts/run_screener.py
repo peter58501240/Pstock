@@ -18,6 +18,7 @@ import statistics
 import time
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
+from trade_quality import assess_quality, quality_score, run_self_test as quality_self_test
 
 TZ = timezone(timedelta(hours=8))
 USER_AGENT = "Mozilla/5.0 (compatible; Pstock-Screener/1.0)"
@@ -258,7 +259,7 @@ def ema(values, length):
     return out
 
 
-def evaluate(stock, bars):
+def evaluate(stock, bars, include_unclassified=False):
     """Compute only from complete, daily bars ending on today's official trade date."""
     if len(bars) < MIN_BARS or bars[-1][0] != stock["date"]:
         return None
@@ -301,14 +302,12 @@ def evaluate(stock, bars):
     elif c[-1] >= ma5*.99 and hist[-1] > hist[-2] and structure_good and ret5 > -3:
         group = "C"
         reasons = ["短線賣壓減弱", "MACD 柱狀體改善", "觀察是否突破"]
-    if not group:
+    if not group and not include_unclassified:
         return None
-
-    support = min(lo[-8:-1])
-    stop = max(support, ma10 if ma10 < c[-1] else 0)
-    if not 0 < stop < c[-1]:
-        stop = support
-    stop_pct = (c[-1] - stop) / c[-1]*100 if 0 < stop < c[-1] else None
+    # O = original-three-condition signal outside the ABC classification.
+    if not group:
+        group = "O"
+    quality = assess_quality(bars, group, ma10, ma20, vol_ratio, break3)
     momentum = "剛翻正" if hist[-1] > 0 and hist[-2] <= 0 else ("正值" if hist[-1] > 0 else "改善中")
     bb_expanding = width > old_width
     sigma = statistics.pstdev(c[-20:])
@@ -333,36 +332,27 @@ def evaluate(stock, bars):
         "bb_width": round(width, 2), "bb_expanding": bb_expanding,
         "classic": classic, "classic_match_count": sum(classic.values()),
         "classic_all_match": all(classic.values()),
-        "breakout": break3, "stop": round(stop, 2) if stop_pct is not None else None,
-        "stop_pct": round(stop_pct, 2) if stop_pct is not None else None,
-        "resistance": round(max(h[-11:-1]), 2), "reasons": reasons,
-        "_ret20": ret20, "_hist_rise": recovery, "_ma20_up": ma20_up
+        "breakout": break3, "reasons": reasons,
+        "_ret20": ret20, "_hist_rise": recovery, "_ma20_up": ma20_up,
+        **quality
     }
 
 
-def rank_candidates(items, market_returns=None):
+def rank_candidates(items, market_returns=None, mode="ABC"):
     if not items:
         return []
     returns = sorted(market_returns if market_returns else [x["_ret20"] for x in items])
     for item in items:
         pct_rank = sum(r <= item["_ret20"] for r in returns) / len(returns)
-        rs_score = 30 * pct_rank
-        structure = (20 if item["group"] == "A" else 15 if item["group"] == "B" else 8)
-        structure += 5 if item["_ma20_up"] else 0
-        vol_score = min(15, max(0, (item["vol_ratio"]-0.5)*12))
-        entry_score = max(0, 20 - max(0, item["dist_ma20"]-3)*2)
-        risk_score = (10 if item["stop_pct"] is not None and item["stop_pct"] <= 6
-                      else 5 if item["stop_pct"] is not None and item["stop_pct"] <= 8 else 0)
-        item["score"] = round(min(100, rs_score + structure + vol_score + entry_score + risk_score))
+        item["score"] = quality_score(item, pct_rank)
         item["rs_percentile"] = round(pct_rank * 100)
-        item["state"] = ("觀察" if item["group"] == "C" else
-                         "等待回踩" if item["dist_ma20"] > 10 else
-                         "風險過高" if item["stop_pct"] is None or item["stop_pct"] > 8 else
-                         "等待確認" if not item["breakout"] else "突破觀察")
+        item["state"] = item.get("quality_state", "觀察")
         for k in ("_ret20", "_hist_rise", "_ma20_up"):
             item.pop(k, None)
     items.sort(key=lambda x: (-x["score"], x["code"]))
-    # Keep multiple groups so one market regime cannot hide all early candidates.
+    if mode == "original":
+        return items[:20]
+    # Keep separate A/B/C slots; a very high trend score cannot hide early turns.
     result = []
     for group in "ABC":
         result.extend([x for x in items if x["group"] == group][:5])
@@ -374,7 +364,8 @@ def run():
     report = {"schema": 1, "updated_at": now.isoformat(timespec="seconds"),
               "market_date": None, "market_dates": {}, "status": "unavailable",
               "universe": 0, "eligible": 0, "history_ready": 0,
-              "scanned": 0, "candidates": [], "insufficient_history": [],
+              "scanned": 0, "candidates": [], "classic_candidates": [],
+              "classic_total": 0, "insufficient_history": [],
               "warnings": [], "errors": []}
     try:
         snapshots, dates, errors = fetch_snapshots()
@@ -431,12 +422,18 @@ def run():
             report["history_ready"] += 1
             if float(bars[-21][4]) > 0:
                 market_returns.append((float(bars[-1][4])/float(bars[-21][4])-1)*100)
-            evaluated = evaluate(stock, bars)
+            evaluated = evaluate(stock, bars, include_unclassified=True)
             if evaluated:
                 items.append(evaluated)
         cache_write(history)
         report["scanned"] = report["history_ready"]
-        report["candidates"] = rank_candidates(items, market_returns)
+        # Calculate the original three-indicator strategy across *every* 
+        # scanned stock, not only those classified A, B or C.
+        originals = [dict(x) for x in items if x["classic_all_match"]]
+        report["classic_total"] = len(originals)
+        report["classic_candidates"] = rank_candidates(originals, market_returns, mode="original")
+        report["candidates"] = rank_candidates(
+            [x for x in items if x["group"] in "ABC"], market_returns)
         fresh = len(dates) == 2 and all(x == trade_day for x in dates.values())
         coverage = report["history_ready"]/max(1, report["eligible"])
         if coverage < .95:
@@ -472,6 +469,7 @@ def self_test():
     evaluated = evaluate(stock, bars)
     assert evaluated is not None and evaluated["group"] == "A", evaluated
     assert rank_candidates([evaluated])[0]["score"] >= 0
+    assert quality_self_test()
     assert set(evaluated["classic"]) == {"macd_flip", "bb_true_open", "ma20_rising"}
     assert evaluated["classic_match_count"] == sum(evaluated["classic"].values())
     # A newly listed security with valid <70 historical bars must be

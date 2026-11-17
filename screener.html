@@ -11,7 +11,7 @@
 .wrap{max-width:1180px;margin:auto;padding:20px 14px 58px}header{display:flex;justify-content:space-between;align-items:center;gap:14px;flex-wrap:wrap}
 h1{margin:5px 0 4px;font-size:25px;letter-spacing:-.6px}.sub{color:var(--muted);font-size:13px;line-height:1.7;margin:0}
 .link{color:var(--blue);font-weight:750;text-decoration:none}.back{display:inline-block;padding:10px 12px;border:1px solid var(--border);border-radius:10px;background:#fff}
-.statgrid{display:grid;grid-template-columns:repeat(4,1fr);gap:11px;margin:19px 0}.stat{background:#fff;border:1px solid var(--border);padding:16px;border-radius:15px}
+.statgrid{display:grid;grid-template-columns:repeat(5,1fr);gap:11px;margin:19px 0}.stat{background:#fff;border:1px solid var(--border);padding:16px;border-radius:15px}
 .stat .cap{font-size:12px;color:var(--muted)}.stat strong{display:block;margin-top:5px;font-size:24px}.stat small{color:var(--muted);font-size:11px}
 .notice{border-radius:12px;padding:12px 15px;margin:12px 0;font-size:13px;line-height:1.8;background:#eef4ff;color:#234070}
 .notice.warn{background:#fff7e9;color:#845309}.notice.error{background:#ffeded;color:#9e2e2e}
@@ -27,7 +27,9 @@ th:first-child,td:first-child{text-align:left}td{border-top:1px solid #edf0f5;pa
 .group{display:inline-block;border-radius:7px;padding:4px 7px;font-size:12px;font-weight:800}
 .group.A{background:#e8f7ef;color:#06784d}.group.B{background:#edf3ff;color:#2858ae}.group.C{background:#fff2dd;color:#93600b}
 .score{font-size:21px;font-weight:900}.reason{color:#5f6c7f;font-size:11px;line-height:1.6;max-width:300px;text-align:left}
-.state{font-weight:800;white-space:nowrap}.state.bad{color:var(--danger)}.state.wait{color:var(--warn)}.action{white-space:nowrap}
+.state{font-weight:800;white-space:normal}.state.avoid{color:var(--danger)}.state.wait{color:var(--warn)}.state.watch{color:var(--ok)}
+.action{white-space:nowrap}.detail{font-size:11px;line-height:1.6;color:var(--muted)}.quality{font-size:12px;font-weight:800}
+.quality.warn{color:var(--danger)}.quality.ok{color:var(--ok)}
 .foot{font-size:12px;color:var(--muted);line-height:1.8;margin-top:14px}.empty{padding:45px 18px;text-align:center;color:var(--muted);font-size:14px}
 h2{font-size:16px;margin:25px 0 10px}.rules{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
 .rule{background:#fff;border:1px solid var(--border);border-radius:13px;padding:14px;font-size:12px;line-height:1.8;color:#4a5767}
@@ -49,7 +51,8 @@ td:nth-child(8){grid-column:1 / 4}td:nth-child(9){grid-column:4;text-align:right
 <header>
   <div><a class="link" href="index.html">← Pstock 投資儀表板</a><h1>每日智慧選股</h1>
   <p class="sub">上市＋上櫃普通股｜強勢續強／止跌轉強／潛力觀察｜收盤訊號、隔日研究</p>
-  <p class="sub">當日收盤資料：證交所／櫃買中心｜歷史 K 線：Yahoo Finance，當日以官方行情校正</p></div>
+  <p class="sub">當日收盤資料：證交所／櫃買中心｜歷史 K 線：Yahoo Finance，當日以官方行情校正</p>
+  <p class="sub">品質分數是研究順序，不是勝率；參考進場價是當日收盤，不代表隔日可以成交。</p></div>
   <button class="chip" id="refresh">重新讀取資料</button>
 </header>
 <div class="statgrid">
@@ -57,6 +60,7 @@ td:nth-child(8){grid-column:1 / 4}td:nth-child(9){grid-column:4;text-align:right
   <div class="stat"><div class="cap">普通股母體</div><strong id="universe">—</strong><small>排除 ETF、TDR、金融</small></div>
   <div class="stat"><div class="cap">有效完成掃描</div><strong id="covered">—</strong><small id="coverage">需有 ≥70 根日 K</small></div>
   <div class="stat"><div class="cap">候選總數</div><strong id="count">—</strong><small>A／B／C 研究名單</small></div>
+  <div class="stat"><div class="cap">原三條件完整符合</div><strong id="classicCount">—</strong><small>獨立全市場掃描；同一量價初篩母體</small></div>
 </div>
 <div id="messages" role="status" aria-live="polite"><div class="notice">資料讀取中…</div></div>
 <div class="toolbar">
@@ -64,13 +68,17 @@ td:nth-child(8){grid-column:1 / 4}td:nth-child(9){grid-column:4;text-align:right
   <button class="chip" data-group="A">A 強勢續強</button>
   <button class="chip" data-group="B">B 止跌轉強</button>
   <button class="chip" data-group="C">C 潛力觀察</button>
+  <button class="chip" data-group="ORIGINAL">原始三條件（獨立）</button>
   <div class="spacer"></div>
   <input id="query" aria-label="搜尋股票" placeholder="搜尋代號／名稱">
+  <select id="readiness" aria-label="品質狀態"><option value="all">全部狀態</option>
+    <option value="watch">隔日關注</option><option value="wait">等待確認</option>
+    <option value="avoid">暫不追價</option></select>
   <select id="sort" aria-label="排序"><option value="score">依總分排序</option>
-    <option value="rs_percentile">依相對強弱</option><option value="ret20">依 20 日漲幅</option><option value="stop_pct">依停損距離（小至大）</option></select>
+    <option value="rs_percentile">依相對強弱</option><option value="ret20">依 20 日漲幅</option><option value="rr">依已知盈虧比</option><option value="stop_pct">依停損距離（小至大）</option></select>
 </div>
 <div class="panel"><table>
-<thead><tr><th>股票</th><th>階段</th><th>分數</th><th>收盤／20 日</th><th>相對強弱</th><th>MA20 乖離</th><th>失敗參考線</th><th style="text-align:left">入選理由／狀態</th><th>圖表</th></tr></thead>
+<thead><tr><th>股票</th><th>階段</th><th>品質分數</th><th>收盤／20 日</th><th>相對強弱</th><th>型態／乖離</th><th>結構失敗線</th><th style="text-align:left">壓力／盈虧比／品質判斷</th><th>圖表</th></tr></thead>
 <tbody id="rows"><tr><td colspan="9">載入中…</td></tr></tbody>
 </table><div id="empty" class="empty" hidden>此類別目前沒有候選股票。</div></div>
 <h2>三個觀察池代表什麼？</h2>
@@ -79,6 +87,7 @@ td:nth-child(8){grid-column:1 / 4}td:nth-child(9){grid-column:4;text-align:right
   <div class="rule"><strong>B｜止跌轉強</strong><div>率先站回 MA5／MA10，MACD 柱狀體持續改善，低點結構開始修復。</div></div>
   <div class="rule"><strong>C｜潛力觀察</strong><div>動能與價格開始穩定，但尚未形成確認買點；不可當成買進訊號。</div></div>
 </div>
+<p class="foot">上方壓力使用歷史已確認的局部高點，盈虧比以當日收盤及結構失敗線估算；若缺乏可靠壓力，不會自行捏造獲利目標或盈虧比。隔日成交價與停損滑價可能使結果改變。判斷規則為研究版，未經完整歷史回測。</p>
 <p class="foot">「原策略 x/3」分別檢驗：①MACD 柱狀體今天由負翻正，②布林通道帶寬擴大且上軌升、下軌降，③股價站上今天上揚的 MA20。這是原網友策略的額外檢核，不是 A／B／C 入選條件。</p>
 <p class="foot">篩選規則為實驗性研究版，尚未完成歷史回測。分數代表各候選的相對排序，不是獲利機率。資料由盤後程式計算；如行情日期不同步或歷史資料未齊，頁面會揭露缺口。停損線只是技術參考，跳空可能無法以該價格成交。</p>
 </div>
@@ -97,6 +106,7 @@ function paint(){
   txt("covered",(p.history_ready??0)+" / "+(p.eligible??0));
   txt("coverage",p.eligible?"有效歷史覆蓋 "+Math.round((p.history_ready||0)/p.eligible*100)+"%":"資料未完成");
   txt("count",all.length);
+  txt("classicCount",p.classic_total??"—");
   txt("sourceDates",Object.entries(p.market_dates||{}).map(([k,v])=>k+"："+v).join(" ／ ")||"未取得行情");
   const box=$("messages");box.innerHTML="";
   if(p.status!=="ready"){
@@ -109,28 +119,42 @@ function paint(){
   for(const m of (p.errors||[]).slice(0,5))box.append(notice(m,"error"));
   const q=$("query").value.trim();
   const key=$("sort").value;
-  let filtered=all.filter(x=>(group==="ALL"||x.group===group)&&(!q||String(x.code).includes(q)||String(x.name).includes(q)));
+  const pool=group==="ORIGINAL"?(p.classic_candidates||[]):all;
+  const qualityFilter=$("readiness").value;
+  let filtered=pool.filter(x=>(group==="ALL"||group==="ORIGINAL"||x.group===group)
+    &&(qualityFilter==="all"||x.quality_status===qualityFilter)
+    &&(!q||String(x.code).includes(q)||String(x.name).includes(q)));
   filtered.sort((a,b)=>key==="stop_pct"?(Number(a.stop_pct??999)-Number(b.stop_pct??999)):
     Number(b[key]??-999)-Number(a[key]??-999));
   const tbody=$("rows");tbody.innerHTML="";
   $("empty").hidden=filtered.length!==0;
+  $("empty").textContent=group==="ORIGINAL"
+    ?"目前沒有完整符合原三條件的個股，或符合目前的品質篩選條件者。"
+    :"此類別目前沒有符合品質篩選條件的候選股票。";
   for(const x of filtered){
     const tr=document.createElement("tr");
     const pctCls=Number(x.ret20)>=0?"pos":"neg";
-    const stateCls=(x.state==="風險過高")?"bad":"wait";
+    const stateCls=x.quality_status==="avoid"?"avoid":x.quality_status==="watch"?"watch":"wait";
+    const stopText=x.stop===null||x.stop===undefined?"—":fmt(x.stop);
+    const riskText=x.stop_pct===null||x.stop_pct===undefined?"—":"−"+fmt(x.stop_pct)+"%";
+    const rrText=x.rr===null||x.rr===undefined?"未能估算":fmt(x.rr,2)+" R";
+    const pressureText=x.resistance===null||x.resistance===undefined?"無確認壓力":fmt(x.resistance);
+    const stageLabel=x.group==="O"?"原策略":x.group;
     tr.innerHTML=
       '<td data-label="股票"><div class="ticker">'+esc(x.name)+' <small>'+esc(x.code)+' · '+esc(x.market)+'</small></div></td>'+
-      '<td data-label="階段"><span class="group '+esc(x.group)+'">'+esc(x.group)+'</span></td>'+
-      '<td data-label="綜合分數"><span class="score">'+esc(x.score)+'</span><div class="reason">原策略 '+(x.classic_match_count??"—")+'/3</div></td>'+
+      '<td data-label="階段"><span class="group '+esc(x.group)+'">'+esc(stageLabel)+'</span></td>'+
+      '<td data-label="綜合分數"><span class="score">'+esc(x.score)+'</span><div class="detail">原三條件 '+(x.classic_match_count??"—")+'/3</div></td>'+
       '<td data-label="收盤／20 日"><span class="metric">'+fmt(x.close)+'</span><br><span class="'+pctCls+'">'+(x.ret20>0?"+":"")+fmt(x.ret20)+'%</span></td>'+
       '<td data-label="相對強弱">前 '+Math.max(1,100-Number(x.rs_percentile||0))+'%</td>'+
-      '<td data-label="MA20 乖離">'+(x.dist_ma20>0?"+":"")+fmt(x.dist_ma20)+'%</td>'+
-      '<td data-label="失敗參考線">'+(x.stop===null?"—":fmt(x.stop))+'<br><small>'+ (x.stop_pct===null?"—":"−"+fmt(x.stop_pct)+"%")+'</small></td>'+
-      '<td data-label="入選理由／狀態"><div class="reason">'+esc((x.reasons||[]).join("、"))+'</div>'+
+      '<td data-label="型態／乖離"><div class="quality">'+esc(x.entry_type||"未分類")+'</div><div class="detail">距 MA20 '+(x.dist_ma20>0?"+":"")+fmt(x.dist_ma20)+'%</div><div class="detail">ATR14 '+fmt(x.atr14,2)+'</div></td>'+
+      '<td data-label="結構失敗線"><b>'+stopText+'</b><div class="detail">參考風險 '+riskText+'</div><div class="detail">'+esc(x.stop_source||"—")+'</div></td>'+
+      '<td data-label="品質判斷"><div class="state '+stateCls+'">'+esc(x.quality_state||x.state||"觀察")+'</div>'+
+      '<div class="detail">已知上方壓力 '+pressureText+'／盈虧比 '+rrText+'</div>'+
+      '<div class="reason">'+esc((x.reasons||[]).join("、"))+'</div>'+
       '<div class="reason">原策略：MACD翻正'+(x.classic?.macd_flip?"✓":"×")+
       ' · 布林開口'+(x.classic?.bb_true_open?"✓":"×")+
       ' · MA20上揚'+(x.classic?.ma20_rising?"✓":"×")+'</div>'+
-      '<div class="state '+stateCls+'">'+esc(x.state||"觀察")+' · MACD '+esc(x.macd||"—")+'</div></td>'+
+      '<div class="detail">'+esc((x.risk_notes||[]).join("；"))+'</div></td>'+
       '<td data-label="深入圖表"><a class="link" href="index.html?stock='+encodeURIComponent(x.code)+'">分析圖表</a></td>';
     tbody.append(tr);
   }
@@ -149,7 +173,7 @@ document.querySelectorAll("[data-group]").forEach(b=>b.onclick=()=>{
   document.querySelectorAll("[data-group]").forEach(x=>x.classList.toggle("active",x===b));
   paint();
 });
-$("sort").onchange=paint;$("query").oninput=paint;$("refresh").onclick=load;
+$("sort").onchange=paint;$("readiness").onchange=paint;$("query").oninput=paint;$("refresh").onclick=load;
 load();
 </script>
 </body>
