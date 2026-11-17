@@ -98,6 +98,61 @@ def normalize_snapshot(raw_rows, market):
     return result
 
 
+
+def fetch_twse_recent(include_etf=False, asof=None):
+    """TWSE MI_INDEX daily table: fallback when STOCK_DAY_ALL is a day behind.
+
+    The source is date-scoped, unlike the latest-only OpenAPI. Require a valid
+    all-stocks table and a plausible number of rows before accepting it.
+    """
+    today = (asof or datetime.now(TZ)).date()
+    for ago in range(4):
+        day = today - timedelta(days=ago)
+        if day.weekday() >= 5:
+            continue
+        query = urlencode({"date": day.strftime("%Y%m%d"),
+                           "type": "ALLBUT0999", "response": "json"})
+        url = f"https://www.twse.com.tw/rwd/zh/afterTrading/MI_INDEX?{query}"
+        try:
+            payload = get_json(url, attempts=1, timeout=23)
+            if payload.get("stat") != "OK":
+                continue
+            output = {}
+            for table in payload.get("tables", []):
+                fields = [re.sub(r"<[^>]+>", "", str(f)).replace(" ", "") for f in table.get("fields", [])]
+                required = ("證券代號", "證券名稱", "成交股數", "開盤價", "最高價", "最低價", "收盤價")
+                if not all(field in fields for field in required):
+                    continue
+                pos = {name: fields.index(name) for name in required}
+                for row in table.get("data", []):
+                    try:
+                        code = str(row[pos["證券代號"]]).strip()
+                        if not re.fullmatch(r"\d{4,6}", code):
+                            continue
+                        if not include_etf and (not re.fullmatch(r"[1-9]\d{3}", code)
+                                                or code.startswith(("28", "91"))):
+                            continue
+                        name = str(row[pos["證券名稱"]]).strip()
+                        o, hi, lo, close, vol = [num(row[pos[k]]) for k in
+                            ("開盤價", "最高價", "最低價", "收盤價", "成交股數")]
+                        if any(v is None for v in (o, hi, lo, close, vol)):
+                            continue
+                        if o <= 0 or close <= 0 or hi < max(o, lo, close) or lo > min(o, hi, close):
+                            continue
+                        output[code] = {
+                            "code": code, "name": name, "market": "上市",
+                            "date": day.isoformat(), "open": o, "high": hi,
+                            "low": lo, "close": close, "volume": int(vol)
+                        }
+                    except (IndexError, ValueError, TypeError):
+                        continue
+                if len(output) >= 200:
+                    return output
+        except (ValueError, TypeError, RuntimeError):
+            continue
+    return {}
+
+
 def fetch_snapshots():
     snapshots, errors, dates = {}, [], {}
     for market, url in (("上市", TWSE), ("上櫃", TPEX)):
@@ -115,6 +170,13 @@ def fetch_snapshots():
             if seen[newest] < len(parsed) * .90:
                 raise ValueError("同一市場資料日期分歧")
             parsed = {k: v for k, v in parsed.items() if v["date"] == newest}
+            if market == "上市":
+                recent = fetch_twse_recent()
+                if recent:
+                    newer = next(iter(recent.values()))["date"]
+                    if newer > newest:
+                        print(f"Using newer TWSE MI_INDEX {newer} instead of OpenAPI {newest}", flush=True)
+                        newest, parsed = newer, recent
             dates[market] = newest
             snapshots.update(parsed)
         except Exception as exc:
