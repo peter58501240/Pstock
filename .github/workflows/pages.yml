@@ -31,7 +31,8 @@ jobs:
           python-version: "3.12"
       - name: Check syntax and stock-scanner logic
         run: |
-          python -m py_compile scripts/run_screener.py scripts/update_prices.py scripts/update_history.py
+          python -m py_compile scripts/run_screener.py scripts/trade_quality.py scripts/update_prices.py scripts/update_history.py
+          python scripts/trade_quality.py
           python scripts/run_screener.py --self-test
           python -c 'import re,pathlib; [pathlib.Path("/tmp/"+p.stem+".js").write_text(re.findall(r"<script[^>]*>(.*?)</script>",p.read_text(encoding="utf-8"),re.S)[-1],encoding="utf-8") for p in [pathlib.Path("index.html"),pathlib.Path("screener.html")]]'
           node --check /tmp/index.js
