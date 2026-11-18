@@ -20,7 +20,8 @@ from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 from trade_quality import assess_quality, quality_score, run_self_test as quality_self_test
 from history_integrity import (
-    recent_continuous_history, refresh_prices, self_test as history_self_test
+    recent_continuous_history, recent_reference_is_verified,
+    refresh_prices, self_test as history_self_test
 )
 
 TZ = timezone(timedelta(hours=8))
@@ -194,17 +195,18 @@ def cache_read():
         with gzip.open(CACHE_PATH, "rt", encoding="utf-8") as f:
             data = json.load(f)
         if data.get("schema") != 1:
-            return {}
-        return data.get("tickers", {})
+            return {}, ""
+        return data.get("tickers", {}), str(data.get("refresh_cursor", ""))
     except (OSError, ValueError, TypeError):
-        return {}
+        return {}, ""
 
 
-def cache_write(history):
+def cache_write(history, refresh_cursor):
     CACHE_PATH.parent.mkdir(parents=True, exist_ok=True)
     tmp = CACHE_PATH.with_suffix(".tmp")
     with gzip.open(tmp, "wt", encoding="utf-8", compresslevel=5) as f:
-        json.dump({"schema": 1, "tickers": history}, f, ensure_ascii=False, separators=(",", ":"))
+        json.dump({"schema": 1, "tickers": history, "refresh_cursor": refresh_cursor},
+                  f, ensure_ascii=False, separators=(",", ":"))
     tmp.replace(CACHE_PATH)
 
 
@@ -281,8 +283,9 @@ def fetch_reference_calendar(trade_day):
                 raise ValueError("歷史交易日曆不足 70 日")
             newest = datetime.strptime(reference[-1], "%Y-%m-%d").date()
             asof = datetime.strptime(trade_day, "%Y-%m-%d").date()
-            if (asof - newest).days > 14:
-                raise ValueError("基準股行情過期")
+            if not recent_reference_is_verified(newest.isoformat(), trade_day):
+                raise ValueError(
+                    "基準股日期落後，最近可能存在未驗證交易日；禁止直接拼接今日行情")
             dates.update(reference)
             sources.append(code)
         except Exception as exc:
@@ -438,20 +441,22 @@ def run():
         report["calendar_sources"] = sources
         report["warnings"].extend(calendar_warnings)
 
-        history = cache_read()
+        history, refresh_cursor = cache_read()
         # Update existing cache for ALL current stocks, even those below
         # today's volume/turnover filter. The historical backfill is still
         # repeated on EVERY future eligible day (below).
         report["cache_updated_all_stocks"] = update_cached_official_quotes(
             history, stocks)
 
-        refreshed, failures, attempted = refresh_prices(
-            eligible, history, fetch_yahoo, MAX_BOOTSTRAP, workers=4)
+        refreshed, failures, attempted, next_cursor = refresh_prices(
+            eligible, history, fetch_yahoo, MAX_BOOTSTRAP,
+            cursor=refresh_cursor, workers=4)
         report["history_refresh"] = {
             "attempted": attempted, "success": len(refreshed),
             "failed": len(failures),
             "limit": MAX_BOOTSTRAP,
             "cache_fallbacks": 0,
+            "rotation_cursor": next_cursor,
         }
         if attempted < len(eligible):
             report["warnings"].append(
@@ -502,7 +507,7 @@ def run():
             evaluated = evaluate(stock, continuous, include_unclassified=True)
             if evaluated:
                 items.append(evaluated)
-        cache_write(history)
+        cache_write(history, next_cursor)
         report["scanned"] = report["history_ready"]
         # Calculate the original three-indicator strategy across *every* 
         # scanned stock, not only those classified A, B or C.
