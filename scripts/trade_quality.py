@@ -40,7 +40,8 @@ def overhead_resistance(bars, price, atr):
     # Must leave at least 2 completed bars to confirm each high.
     for i in range(max(2, len(bars)-90), len(bars)-2):
         if highs[i] >= max(highs[i-2:i]) and highs[i] > max(highs[i+1:i+3]):
-            if highs[i] > price + 0.5 * atr:
+            # Keep even nearby resistance; discarding it would overstate reward.
+            if highs[i] > price:
                 pivots.append(highs[i])
     return min(pivots) if pivots else None
 
@@ -100,14 +101,15 @@ def assess_quality(bars, group, ma10, ma20, vol_ratio, break3):
     rr_low = rr is not None and rr < 2
     setup_present = stage != "尚未形成可執行型態"
 
-    if group == "C":
-        status, label = "wait", "築底觀察，尚未確認"
-    elif is_extended:
+    # Risk exclusions always outrank watchlist stage, including C candidates.
+    if is_extended:
         status, label = "avoid", "乖離過大，不追價"
     elif risk_oversized:
-        status, label = "avoid", "結構停損超過 8%"
+        status, label = "avoid", "結構停損超過 8% 或失敗線不可用"
     elif rr_low:
         status, label = "avoid", "上方壓力近，盈虧比不足 2"
+    elif group == "C":
+        status, label = "wait", "築底觀察，尚未確認"
     elif not setup_present:
         status, label = "wait", "等待突破／回踩確認"
     else:
@@ -203,6 +205,27 @@ def run_self_test():
             for i in range(85)]
     q = assess_quality(flat, "C", 50.1, 50.1, 0.8, False)
     assert q["quality_status"] == "wait"
+
+    # Regression: a C candidate must never bypass an oversized structural stop.
+    far_stop_bars = [[(start+timedelta(days=i)).isoformat(), 99.8,
+                       100.5, 89.0, 100.0, 500000] for i in range(85)]
+    c_risk = assess_quality(far_stop_bars, "C", 100, 100, 0.8, False)
+    assert c_risk["stop_pct"] > 8, c_risk
+    assert c_risk["quality_status"] == "avoid", c_risk
+    assert quality_score({**c_risk, "group": "C", "vol_ratio": 0.8}, .85) <= 55
+
+    # Regression: when two historical highs are confirmed, the closest
+    # *above* the close must count even if less than half an ATR away.
+    near_resistance_bars = [[(start+timedelta(days=i)).isoformat(), 99.9,
+                            100.1, 99.0, 100.0, 500000] for i in range(85)]
+    near_resistance_bars[-40][2] = 110.0
+    near_resistance_bars[-20][2] = 100.2
+    near = overhead_resistance(near_resistance_bars, 100.0, 2.0)
+    assert abs(near - 100.2) < 1e-9, near
+    a_risk = assess_quality(near_resistance_bars, "A", 100, 100, 0.9, False)
+    assert a_risk["resistance"] == 100.2, a_risk
+    assert a_risk["rr"] is not None and a_risk["rr"] < 2, a_risk
+    assert a_risk["quality_status"] == "avoid", a_risk
     return True
 
 
