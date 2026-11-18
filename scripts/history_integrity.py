@@ -6,6 +6,7 @@ Do not manufacture prices for trading halts, absent quotes, or failed downloads.
 """
 
 from datetime import date, timedelta
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import math
 
 
@@ -64,27 +65,32 @@ def recent_continuous_history(bars, market_calendar, trade_day, min_bars=70):
     return "short", tail, []
 
 
-def refresh_prices(eligible, history, fetcher, limit):
-    """Re-download eligible stock history *every run*, even if cached.
+def refresh_prices(eligible, history, fetcher, limit, workers=4):
+    """Re-download EVERY eligible stock's history, even if cached.
 
-    This backfills any session missed while the stock was ineligible or
-    GitHub Actions was interrupted. On fetch failure, existing cache is
-    retained but must pass the independent calendar gate before scoring.
+    A cached stock that missed market sessions while ineligible (or during a
+    workflow outage) is repaired as soon as it re-enters the eligible set.
+    Preserve the old cache on transient fetch failure, but the caller MUST
+    independently validate consecutive market dates before using that cache.
     """
     priority = sorted(eligible, key=lambda x: -x["volume"] * x["close"])
     targets = priority[:max(0, int(limit))]
-    failed = []
-    refreshed = set()
-    for stock in targets:
-        try:
-            bars = fetcher(stock)
-            if not bars or not all(valid_bar(b) for b in bars):
-                raise ValueError("歷史日 K 無效或為空")
-            history[stock["code"]] = bars
-            refreshed.add(stock["code"])
-        except Exception as exc:
-            failed.append((stock["code"], str(exc)))
-    return refreshed, failed, len(targets)
+    failed, refreshed = [], set()
+    if not targets:
+        return refreshed, failed, 0
+    with ThreadPoolExecutor(max_workers=max(1, workers)) as pool:
+        futures = {pool.submit(fetcher, stock): stock for stock in targets}
+        for task in as_completed(futures):
+            stock = futures[task]
+            try:
+                bars = task.result()
+                if not bars or not all(valid_bar(b) for b in bars):
+                    raise ValueError("歷史日 K 無效或為空")
+                history[stock["code"]] = bars
+                refreshed.add(stock["code"])
+            except Exception as exc:
+                failed.append((stock["code"], str(exc)))
+    return refreshed, sorted(failed), len(targets)
 
 
 def self_test():
