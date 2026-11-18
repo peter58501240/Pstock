@@ -252,6 +252,17 @@ def upsert_bar(bars, stock):
     return [merged[d] for d in sorted(merged)][-260:]
 
 
+def update_cached_official_quotes(history, all_market_stocks):
+    """Keep existing history current regardless of today's liquidity screen."""
+    updated = 0
+    for stock in all_market_stocks:
+        code = stock["code"]
+        if history.get(code):
+            history[code] = upsert_bar(history[code], stock)
+            updated += 1
+    return updated
+
+
 def fetch_reference_calendar(trade_day):
     """Obtain independent market trading dates from two liquid benchmarks.
 
@@ -431,9 +442,8 @@ def run():
         # Update existing cache for ALL current stocks, even those below
         # today's volume/turnover filter. The historical backfill is still
         # repeated on EVERY future eligible day (below).
-        for stock in stocks:
-            if history.get(stock["code"]):
-                history[stock["code"]] = upsert_bar(history[stock["code"]], stock)
+        report["cache_updated_all_stocks"] = update_cached_official_quotes(
+            history, stocks)
 
         refreshed, failures, attempted = refresh_prices(
             eligible, history, fetch_yahoo, MAX_BOOTSTRAP, workers=4)
@@ -545,6 +555,18 @@ def self_test():
     evaluated = evaluate(stock, bars)
     assert evaluated is not None and evaluated["group"] == "A", evaluated
     assert rank_candidates([evaluated])[0]["score"] >= 0
+    # A stock below the liquidity threshold still records today's official
+    # market bar if it has already been cached.
+    old = bars[:-1]
+    cache = {"2330": old}
+    low_liquidity = {
+        "code": "2330", "date": bars[-1][0], "open": bars[-1][1],
+        "high": bars[-1][2], "low": bars[-1][3], "close": bars[-1][4],
+        "volume": 1000,  # would be screened out today
+    }
+    assert update_cached_official_quotes(cache, [low_liquidity]) == 1
+    assert cache["2330"][-1][0] == bars[-1][0]
+    assert cache["2330"][-1][5] == 1000
     assert quality_self_test()
     history_self_test()
     assert set(evaluated["classic"]) == {"macd_flip", "bb_true_open", "ma20_rising"}
