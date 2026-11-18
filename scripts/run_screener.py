@@ -19,6 +19,10 @@ import time
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 from trade_quality import assess_quality, quality_score, run_self_test as quality_self_test
+from history_integrity import (
+    recent_continuous_history, recent_reference_is_verified,
+    refresh_prices, self_test as history_self_test
+)
 
 TZ = timezone(timedelta(hours=8))
 USER_AGENT = "Mozilla/5.0 (compatible; Pstock-Screener/1.0)"
@@ -27,7 +31,8 @@ TPEX = "https://www.tpex.org.tw/openapi/v1/tpex_mainboard_daily_close_quotes"
 CACHE_PATH = Path(os.getenv("SCREENER_HISTORY_PATH", "/tmp/pstock-screener-history.json.gz"))
 OUTPUT = Path("data/screener.json")
 MIN_BARS = 70
-MAX_BOOTSTRAP = int(os.getenv("SCREENER_BOOTSTRAP_LIMIT", "650"))
+MAX_BOOTSTRAP = int(os.getenv("SCREENER_REFRESH_LIMIT",
+                                os.getenv("SCREENER_BOOTSTRAP_LIMIT", "650")))
 
 
 def num(value):
@@ -190,17 +195,18 @@ def cache_read():
         with gzip.open(CACHE_PATH, "rt", encoding="utf-8") as f:
             data = json.load(f)
         if data.get("schema") != 1:
-            return {}
-        return data.get("tickers", {})
+            return {}, ""
+        return data.get("tickers", {}), str(data.get("refresh_cursor", ""))
     except (OSError, ValueError, TypeError):
-        return {}
+        return {}, ""
 
 
-def cache_write(history):
+def cache_write(history, refresh_cursor):
     CACHE_PATH.parent.mkdir(parents=True, exist_ok=True)
     tmp = CACHE_PATH.with_suffix(".tmp")
     with gzip.open(tmp, "wt", encoding="utf-8", compresslevel=5) as f:
-        json.dump({"schema": 1, "tickers": history}, f, ensure_ascii=False, separators=(",", ":"))
+        json.dump({"schema": 1, "tickers": history, "refresh_cursor": refresh_cursor},
+                  f, ensure_ascii=False, separators=(",", ":"))
     tmp.replace(CACHE_PATH)
 
 
@@ -240,9 +246,53 @@ def fetch_yahoo(stock):
 def upsert_bar(bars, stock):
     today = [stock["date"], stock["open"], stock["high"], stock["low"],
              stock["close"], stock["volume"]]
-    merged = {b[0]: b for b in bars if isinstance(b, list) and len(b) == 6}
-    merged[today[0]] = today  # official exchange snapshot takes precedence
+    # Discard any future/intraday Yahoo bar. The verified official daily OHLCV
+    # is the single authority for the latest date.
+    merged = {b[0]: b for b in bars
+              if isinstance(b, list) and len(b) == 6 and b[0] < stock["date"]}
+    merged[today[0]] = today
     return [merged[d] for d in sorted(merged)][-260:]
+
+
+def update_cached_official_quotes(history, all_market_stocks):
+    """Keep existing history current regardless of today's liquidity screen."""
+    updated = 0
+    for stock in all_market_stocks:
+        code = stock["code"]
+        if history.get(code):
+            history[code] = upsert_bar(history[code], stock)
+            updated += 1
+    return updated
+
+
+def fetch_reference_calendar(trade_day):
+    """Obtain independent market trading dates from two liquid benchmarks.
+
+    Never infer trading sessions from weekdays: exchange holidays are variable.
+    Both TWSE/TPEx use the same ordinary stock trading calendar in this
+    strategy's daily timeframe. A missing reference stops the quality gate.
+    """
+    dates = {trade_day}
+    sources = []
+    errors = []
+    for code in ("2330", "0050"):
+        try:
+            bars = fetch_yahoo({"code": code, "market": "上市"})
+            reference = [b[0] for b in bars if b[0] <= trade_day]
+            if len(reference) < MIN_BARS:
+                raise ValueError("歷史交易日曆不足 70 日")
+            newest = datetime.strptime(reference[-1], "%Y-%m-%d").date()
+            asof = datetime.strptime(trade_day, "%Y-%m-%d").date()
+            if not recent_reference_is_verified(newest.isoformat(), trade_day):
+                raise ValueError(
+                    "基準股日期落後，最近可能存在未驗證交易日；禁止直接拼接今日行情")
+            dates.update(reference)
+            sources.append(code)
+        except Exception as exc:
+            errors.append(f"交易日曆 {code} 取得失敗：{exc}")
+    if not sources or len(dates) < MIN_BARS:
+        raise RuntimeError("無法取得可信交易日曆，停止選股評分")
+    return sorted(dates), sources, errors
 
 
 def avg(vals):
@@ -366,6 +416,8 @@ def run():
               "universe": 0, "eligible": 0, "history_ready": 0,
               "scanned": 0, "candidates": [], "classic_candidates": [],
               "classic_total": 0, "insufficient_history": [],
+              "history_gaps": [], "history_unavailable": [],
+              "history_refresh": {}, "calendar_sources": [],
               "warnings": [], "errors": []}
     try:
         snapshots, dates, errors = fetch_snapshots()
@@ -383,49 +435,79 @@ def run():
         eligible = [s for s in stocks if s["close"] >= 10 and
                     s["volume"] >= 700_000 and s["close"]*s["volume"] >= 20_000_000]
         report["eligible"] = len(eligible)
-        history = cache_read()
-        # Priority: highly liquid names first, plus all prior successes.
-        missing = [s for s in sorted(eligible, key=lambda s: -s["volume"]*s["close"])
-                   if not history.get(s["code"])]
-        todo = missing[:max(0, MAX_BOOTSTRAP)]
-        if todo:
-            print(f"Bootstrapping {len(todo)} / {len(missing)} eligible histories", flush=True)
-            with ThreadPoolExecutor(max_workers=4) as pool:
-                futures = {pool.submit(fetch_yahoo, s): s for s in todo}
-                failures = 0
-                for f in as_completed(futures):
-                    stock = futures[f]
-                    try:
-                        history[stock["code"]] = f.result()
-                    except Exception as exc:
-                        failures += 1
-                        if failures <= 3:
-                            report["warnings"].append(f"{stock['code']} 歷史下載失敗：{exc}")
-            print(f"Bootstrap failures: {failures}", flush=True)
+        # An independent exchange calendar is mandatory. Neither length-only
+        # tests nor two distant snapshot dates can prove a continuous series.
+        calendar, sources, calendar_warnings = fetch_reference_calendar(trade_day)
+        report["calendar_sources"] = sources
+        report["warnings"].extend(calendar_warnings)
+
+        history, refresh_cursor = cache_read()
+        # Update existing cache for ALL current stocks, even those below
+        # today's volume/turnover filter. The historical backfill is still
+        # repeated on EVERY future eligible day (below).
+        report["cache_updated_all_stocks"] = update_cached_official_quotes(
+            history, stocks)
+
+        refreshed, failures, attempted, next_cursor = refresh_prices(
+            eligible, history, fetch_yahoo, MAX_BOOTSTRAP,
+            cursor=refresh_cursor, workers=4)
+        report["history_refresh"] = {
+            "attempted": attempted, "success": len(refreshed),
+            "failed": len(failures),
+            "limit": MAX_BOOTSTRAP,
+            "cache_fallbacks": 0,
+            "rotation_cursor": next_cursor,
+        }
+        if attempted < len(eligible):
+            report["warnings"].append(
+                f"本次重新補抓上限 {MAX_BOOTSTRAP} 檔，仍有 {len(eligible)-attempted} 檔待刷新")
+        if failures:
+            report["warnings"].append(
+                f"Yahoo 歷史下載失敗 {len(failures)} 檔；只有快取交易日完整者才能繼續評分")
+            for code, why in failures[:2]:
+                report["warnings"].append(f"{code} 下載異常：{why}")
+
         items = []
         market_returns = []
         for stock in eligible:
-            bars = history.get(stock["code"], [])
+            code = stock["code"]
+            bars = history.get(code, [])
             if not bars:
+                report["history_unavailable"].append(code)
                 continue
             bars = upsert_bar(bars, stock)
-            history[stock["code"]] = bars
-            if bars[-1][0] != trade_day:
+            history[code] = bars
+            status, continuous, gaps = recent_continuous_history(
+                bars, calendar, trade_day, min_bars=MIN_BARS)
+            if status != "ready":
+                if status == "short":
+                    report["insufficient_history"].append({
+                        "code": code, "name": stock["name"],
+                        "available": len(continuous), "required": MIN_BARS,
+                        "status": "新掛牌／歷史交易資料累積中"
+                    })
+                elif status == "gap":
+                    report["history_gaps"].append({
+                        "code": code, "name": stock["name"],
+                        "missing": gaps[:3],
+                        "continuous_bars": len(continuous)
+                    })
+                else:
+                    report["history_unavailable"].append(code)
                 continue
-            if len(bars) < MIN_BARS:
-                report["insufficient_history"].append({
-                    "code": stock["code"], "name": stock["name"],
-                    "available": len(bars), "required": MIN_BARS,
-                    "status": "資料累積中"
-                })
-                continue
+
+            if code not in refreshed:
+                report["history_refresh"]["cache_fallbacks"] += 1
+            # Only the calendar-verified, uninterrupted series enters MA,
+            # MACD, Bollinger, ATR and relative-strength calculations.
             report["history_ready"] += 1
-            if float(bars[-21][4]) > 0:
-                market_returns.append((float(bars[-1][4])/float(bars[-21][4])-1)*100)
-            evaluated = evaluate(stock, bars, include_unclassified=True)
+            if float(continuous[-21][4]) > 0:
+                market_returns.append(
+                    (float(continuous[-1][4])/float(continuous[-21][4])-1)*100)
+            evaluated = evaluate(stock, continuous, include_unclassified=True)
             if evaluated:
                 items.append(evaluated)
-        cache_write(history)
+        cache_write(history, next_cursor)
         report["scanned"] = report["history_ready"]
         # Calculate the original three-indicator strategy across *every* 
         # scanned stock, not only those classified A, B or C.
@@ -436,10 +518,19 @@ def run():
             [x for x in items if x["group"] in "ABC"], market_returns)
         fresh = len(dates) == 2 and all(x == trade_day for x in dates.values())
         coverage = report["history_ready"]/max(1, report["eligible"])
-        if coverage < .95:
+        if coverage < 1:
             report["warnings"].append(
-                f"歷史資料建置中：已完成 {report['history_ready']}／{report['eligible']} 檔（{coverage:.0%}）")
-        report["status"] = "ready" if fresh and coverage >= .95 else "partial"
+                f"完整交易日序列僅 {report['history_ready']}／{report['eligible']} 檔"
+                f"（{coverage:.0%}），未通過者不參與排名")
+        if report["history_gaps"]:
+            report["warnings"].append(
+                f"{len(report['history_gaps'])} 檔發現交易日缺漏，已排除其策略計算")
+        # Never publish an apparently full-market 'ready' label while
+        # a listing, outage, skipped refresh or market date remains unverified.
+        report["status"] = (
+            "ready" if fresh and report["eligible"] > 0
+            and report["history_ready"] == report["eligible"] and not report["errors"]
+            else "partial")
         print(f"Snapshot {dates}; ready {report['history_ready']}/{report['eligible']}; "
               f"candidates {len(report['candidates'])}; status {report['status']}", flush=True)
     except Exception as exc:
@@ -469,7 +560,20 @@ def self_test():
     evaluated = evaluate(stock, bars)
     assert evaluated is not None and evaluated["group"] == "A", evaluated
     assert rank_candidates([evaluated])[0]["score"] >= 0
+    # A stock below the liquidity threshold still records today's official
+    # market bar if it has already been cached.
+    old = bars[:-1]
+    cache = {"2330": old}
+    low_liquidity = {
+        "code": "2330", "date": bars[-1][0], "open": bars[-1][1],
+        "high": bars[-1][2], "low": bars[-1][3], "close": bars[-1][4],
+        "volume": 1000,  # would be screened out today
+    }
+    assert update_cached_official_quotes(cache, [low_liquidity]) == 1
+    assert cache["2330"][-1][0] == bars[-1][0]
+    assert cache["2330"][-1][5] == 1000
     assert quality_self_test()
+    history_self_test()
     assert set(evaluated["classic"]) == {"macd_flip", "bb_true_open", "ma20_rising"}
     assert evaluated["classic_match_count"] == sum(evaluated["classic"].values())
     # A newly listed security with valid <70 historical bars must be
