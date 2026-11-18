@@ -58,7 +58,7 @@ td:nth-child(8){grid-column:1 / 4}td:nth-child(9){grid-column:4;text-align:right
 <div class="statgrid">
   <div class="stat"><div class="cap">行情日期</div><strong id="date">—</strong><small id="sourceDates">尚未取得</small></div>
   <div class="stat"><div class="cap">普通股母體</div><strong id="universe">—</strong><small>排除 ETF、TDR、金融</small></div>
-  <div class="stat"><div class="cap">有效完成掃描</div><strong id="covered">—</strong><small id="coverage">需有 ≥70 根日 K</small></div>
+  <div class="stat"><div class="cap">有效完成掃描</div><strong id="covered">—</strong><small id="coverage">需有 ≥70 個連續且已驗證的市場交易日</small></div>
   <div class="stat"><div class="cap">候選總數</div><strong id="count">—</strong><small>A／B／C 研究名單</small></div>
   <div class="stat"><div class="cap">原三條件完整符合</div><strong id="classicCount">—</strong><small>獨立全市場掃描；同一量價初篩母體</small></div>
 </div>
@@ -89,6 +89,7 @@ td:nth-child(8){grid-column:1 / 4}td:nth-child(9){grid-column:4;text-align:right
 </div>
 <p class="foot">上方壓力使用歷史已確認的局部高點，盈虧比以當日收盤及結構失敗線估算；若缺乏可靠壓力，不會自行捏造獲利目標或盈虧比。隔日成交價與停損滑價可能使結果改變。判斷規則為研究版，未經完整歷史回測。</p>
 <p class="foot">「原策略 x/3」分別檢驗：①MACD 柱狀體今天由負翻正，②布林通道帶寬擴大且上軌升、下軌降，③股價站上今天上揚的 MA20。這是原網友策略的額外檢核，不是 A／B／C 入選條件。</p>
+<p class="foot">資料品質保護：對照每日市場交易日曆，只有至少 70 個連續交易日的有效日 K 可計算技術指標。若曾停牌、資料供應商漏日或排程中斷，必須補齊或累積足夠新的連續交易日；不會推估或捏造缺失價格。最新收盤使用官方行情，歷史由 Yahoo 重新補抓。</p>
 <p class="foot">篩選規則為實驗性研究版，尚未完成歷史回測。分數代表各候選的相對排序，不是獲利機率。資料由盤後程式計算；如行情日期不同步或歷史資料未齊，頁面會揭露缺口。停損線只是技術參考，跳空可能無法以該價格成交。</p>
 </div>
 <script>
@@ -104,7 +105,7 @@ function paint(){
   txt("date",p.market_date||"—");
   txt("universe",p.universe??"—");
   txt("covered",(p.history_ready??0)+" / "+(p.eligible??0));
-  txt("coverage",p.eligible?"有效歷史覆蓋 "+Math.round((p.history_ready||0)/p.eligible*100)+"%":"資料未完成");
+  txt("coverage",p.eligible?"交易日曆驗證通過 "+Math.round((p.history_ready||0)/p.eligible*100)+"%":"資料未完成");
   txt("count",all.length);
   txt("classicCount",p.classic_total??"—");
   txt("sourceDates",Object.entries(p.market_dates||{}).map(([k,v])=>k+"："+v).join(" ／ ")||"未取得行情");
@@ -112,6 +113,21 @@ function paint(){
   if(p.status!=="ready"){
     box.append(notice(p.status==="partial"?"部分資料就緒：結果只涵蓋已完成掃描的股票，請勿視為全市場完整排名。":"選股資料尚未就緒；請查閱資料錯誤或執行紀錄。","warn"));
   } else box.append(notice("已完成全市場盤後掃描。請依你的交易計畫自行判斷是否進場。"));
+  if((p.calendar_sources||[]).length){
+    box.append(notice("交易日曆交叉驗證："+(p.calendar_sources||[]).join("、")+"｜最新行情以證交所與櫃買中心為準。"));
+  }
+  const refresh=p.history_refresh||{};
+  if(refresh.attempted!==undefined){
+    box.append(notice("歷史日 K 本次重抓 "+refresh.attempted+" 檔，成功 "+refresh.success+" 檔；"
+      +"下載失敗 "+refresh.failed+" 檔；快取完成校驗後使用 "+refresh.cache_fallbacks+" 檔。"));
+  }
+  for(const x of (p.history_gaps||[]).slice(0,5)){
+    box.append(notice(x.code+" "+x.name+"：最近連續交易日資料缺漏（"+(x.missing||[]).join("、")
+      +"），只剩 "+x.continuous_bars+" 根連續日 K；已禁止參與評分。","error"));
+  }
+  if((p.history_unavailable||[]).length){
+    box.append(notice((p.history_unavailable||[]).length+" 檔歷史資料無法通過驗證，暫不參與選股；例："+(p.history_unavailable||[]).slice(0,8).join("、"),"warn"));
+  }
   for(const x of (p.insufficient_history||[]).slice(0,5)){
     box.append(notice(x.code+" "+x.name+"：目前只有 "+x.available+"/"+x.required+" 根有效日 K；資料累積中，暫不參與完整策略評分。"));
   }
