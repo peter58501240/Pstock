@@ -65,19 +65,45 @@ def recent_continuous_history(bars, market_calendar, trade_day, min_bars=70):
     return "short", tail, []
 
 
-def refresh_prices(eligible, history, fetcher, limit, workers=4):
-    """Re-download EVERY eligible stock's history, even if cached.
+def recent_reference_is_verified(last_reference_day, trade_day):
+    """Reject a calendar with an unverified weekday between source and today.
 
-    A cached stock that missed market sessions while ineligible (or during a
-    workflow outage) is repaired as soon as it re-enters the eligible set.
-    Preserve the old cache on transient fetch failure, but the caller MUST
-    independently validate consecutive market dates before using that cache.
+    On the day after a market holiday, this can conservatively fail closed
+    until Yahoo catches up; it must never silently compress trading days.
     """
-    priority = sorted(eligible, key=lambda x: -x["volume"] * x["close"])
-    targets = priority[:max(0, int(limit))]
+    try:
+        last = date.fromisoformat(last_reference_day)
+        today = date.fromisoformat(trade_day)
+        if last > today:
+            return False
+        cursor = last + timedelta(days=1)
+        while cursor < today:
+            if cursor.weekday() < 5:
+                return False
+            cursor += timedelta(days=1)
+        return True
+    except (TypeError, ValueError, OverflowError):
+        return False
+
+
+def refresh_prices(eligible, history, fetcher, limit, cursor="", workers=4):
+    """Refresh at most 'limit' histories, rotating across the ENTIRE universe.
+
+    A persistent lexicographic ticker cursor avoids starving lower-turnover
+    names when eligible stocks exceed the daily request cap. Every eligible
+    stock is periodically re-fetched to repair missed sessions. Current-day
+    official bars are merged into all cached names independently.
+    """
+    ordered = sorted(eligible, key=lambda x: x["code"])
+    last_code = str(cursor or "")
+    start = next((i for i, stock in enumerate(ordered)
+                  if stock["code"] > last_code), 0)
+    count = min(len(ordered), max(0, int(limit)))
+    targets = [ordered[(start + i) % len(ordered)] for i in range(count)] if ordered else []
+    next_cursor = targets[-1]["code"] if targets else last_code
     failed, refreshed = [], set()
     if not targets:
-        return refreshed, failed, 0
+        return refreshed, failed, 0, next_cursor
     with ThreadPoolExecutor(max_workers=max(1, workers)) as pool:
         futures = {pool.submit(fetcher, stock): stock for stock in targets}
         for task in as_completed(futures):
@@ -90,7 +116,7 @@ def refresh_prices(eligible, history, fetcher, limit, workers=4):
                 refreshed.add(stock["code"])
             except Exception as exc:
                 failed.append((stock["code"], str(exc)))
-    return refreshed, sorted(failed), len(targets)
+    return refreshed, sorted(failed), len(targets), next_cursor
 
 
 def self_test():
@@ -114,7 +140,7 @@ def self_test():
     # A later eligible-day Yahoo backfill must repair the missing session.
     sample = [{"code": "2330", "volume": 1_000_000, "close": 30}]
     history = {"2330": missing}
-    refreshed, failed, count = refresh_prices(sample, history,
+    refreshed, failed, count, cursor = refresh_prices(sample, history,
                                              lambda stock: complete, 1)
     assert count == 1 and refreshed == {"2330"} and not failed
     status, tail, gaps = recent_continuous_history(history["2330"], dates, dates[-1])
@@ -124,7 +150,7 @@ def self_test():
     history = {"2330": missing}
     def broken_fetch(stock):
         raise RuntimeError("mock Yahoo timeout")
-    refreshed, failed, count = refresh_prices(sample, history, broken_fetch, 1)
+    refreshed, failed, count, cursor = refresh_prices(sample, history, broken_fetch, 1)
     assert not refreshed and len(failed) == 1
     assert recent_continuous_history(history["2330"], dates, dates[-1])[0] == "gap"
 
@@ -135,6 +161,26 @@ def self_test():
     # modern indicators; the latest 70+ consecutive bars are still valid.
     old_missing = [b for b in complete if b[0] != dates[2]]
     assert recent_continuous_history(old_missing, dates, dates[-1])[0] == "ready"
+
+    # Rotation is persistent and must eventually include every eligible name,
+    # not permanently select the highest turnover cohort.
+    stocks = [{"code": code, "volume": 1_000_000, "close": 30}
+              for code in ("1101", "1102", "1103", "1104", "1105")]
+    seen = set()
+    cursor = ""
+    cache = {}
+    for _ in range(3):
+        downloaded, failed, n, cursor = refresh_prices(
+            stocks, cache, lambda stock: complete, 2, cursor=cursor, workers=2)
+        assert n == 2 and not failed
+        seen.update(downloaded)
+    assert seen == {s["code"] for s in stocks}, (seen, cursor)
+
+    # Freshness needs independent proof between benchmark and official day.
+    assert recent_reference_is_verified("2026-11-17", "2026-11-18")
+    assert recent_reference_is_verified("2026-11-13", "2026-11-16")
+    assert not recent_reference_is_verified("2026-11-16", "2026-11-18")
+    assert not recent_reference_is_verified("2026-11-13", "2026-11-18")
 
     # Wrong latest date, and calendar quality failures, are rejected.
     assert recent_continuous_history(complete[:-1], dates, dates[-1])[0] == "stale"
