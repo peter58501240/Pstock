@@ -48,12 +48,9 @@ jobs:
         run: |
           python scripts/run_screener.py
           python -c 'import json; x=json.load(open("data/screener.json")); print("Universe",x["universe"],"Historic",x["history_ready"],"Calendar",x["calendar_sources"],"Refreshed",x["history_refresh"],"Missing",len(x["history_gaps"]),"Classic",x["classic_total"],"Pool",len(x["candidates"])); assert x["universe"]>1000 and len(x["calendar_sources"])>0 and "classic_candidates" in x; assert all("quality_state" in r and "entry_type" in r and "stop_source" in r for r in x["candidates"]+x["classic_candidates"])'
-  deploy:
+  build:
     if: github.ref == 'refs/heads/main'
     needs: verify
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -101,6 +98,36 @@ jobs:
         with:
           path: "."
 
+  # Run deployment in a NEW job, only after upload has fully finished.
+  # Same-job deployments intermittently see zero artifacts just after upload.
+  # See GitHub's recommended dedicated Pages deployment-job layout.
+  deploy:
+    if: github.ref == 'refs/heads/main'
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url || steps.deployment_retry.outputs.page_url }}
+    steps:
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v4
+        continue-on-error: true
+
+      # GitHub's artifact metadata may temporarily lag behind a successful
+      # upload. Retry ONLY deployment, never re-upload a second artifact.
+      - name: Delay before retry
+        if: steps.deployment.outcome == 'failure'
+        run: sleep 25
+
+      - name: Retry GitHub Pages deployment
+        if: steps.deployment.outcome == 'failure'
+        id: deployment_retry
+        uses: actions/deploy-pages@v4
+        continue-on-error: true
+
+      - name: Fail if both deployment attempts failed
+        if: steps.deployment.outcome == 'failure' && steps.deployment_retry.outcome == 'failure'
+        run: |
+          echo "::error::GitHub Pages deployment failed twice; uploaded artifact was not published."
+          exit 1
